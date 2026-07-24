@@ -1,0 +1,73 @@
+{
+  "name": "morse-lstm-curriculum",
+  "output_directory": "models",
+  "reference_wav": "reference.wav",
+  "adaptive": {
+    "exact_text_threshold": 0.9,
+    "required_epochs": 2,
+    "max_epochs_per_dimension": 50,
+    "selection_seed": 42
+  },
+  "training": {
+    "epochs": 1000000,
+    "early_stopping": 0,
+    "train_samples": 10000,
+    "validation_samples": 1000,
+    "batch_size": 32,
+    "device": "auto",
+    "learning_rate": 0.0008,
+    "minimum_learning_rate": 0.0001,
+    "regenerate_every": 5,
+    "perfect_epochs": 5
+  },
+  "dimensions": {
+    "wpm": {
+      "lower_limit": 10,
+      "upper_limit": 40,
+      "start": 25,
+      "step": 2
+    },
+    "frequency": {
+      "lower_limit": 100,
+      "upper_limit": 2000,
+      "start": 700,
+      "step": 100
+    },
+    "jitter": {
+      "lower_limit": 0,
+      "upper_limit": 0.1,
+      "start": 0,
+      "step": 0.02
+    },
+    "noise_power": {
+      "lower_limit": 0,
+      "upper_limit": 200,
+      "start": 0,
+      "step": 5
+    },
+    "amplitude": {
+      "lower_limit": 10,
+      "upper_limit": 150,
+      "start": 100,
+      "step": 10
+    },
+    "fade_depth": {
+      "lower_limit": 0,
+      "upper_limit": 60,
+      "start": 0,
+      "step": 10
+    },
+    "fade_frequency": {
+      "lower_limit": 0.1,
+      "upper_limit": 2.0,
+      "start": 0.5,
+      "step": 0.2
+    },
+    "rise_fall": {
+      "lower_limit": 0,
+      "upper_limit": 10,
+      "start": 0,
+      "step": 1
+    }
+  }
+}

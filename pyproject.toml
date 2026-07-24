@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "morse-timing-model"
+version = "0.1.0"
+description = "Streaming Morse audio decoding with adaptive curriculum training"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10",
+    "numpy>=2.1",
+    "torch>=2.6",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.3"]
+onnx = ["onnx==1.20.1"]
+kaggle-upload = ["kagglehub==0.4.1"]
+live = ["sounddevice>=0.5,<1"]
+
+[project.scripts]
+morse-generate-audio = "morse_timing.audio:main"
+morse-spectrogram = "morse_timing.spectrogram:main"
+morse-audio-decode = "morse_timing.audio_inference:main"
+morse-audio-train = "morse_timing.train:main"
+morse-curriculum = "morse_timing.curriculum:main"
+morse-export-onnx = "morse_timing.export_onnx:main"
+morse-live-decode = "morse_timing.live_inference:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
