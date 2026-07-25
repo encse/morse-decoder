@@ -847,8 +847,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     if result.error:
         print(f"error={result.error}")
-    print(f"wav={wav_path}")
-    print(f"analysis={image_path}")
+    print(f"wav= {wav_path}")
+    print(f"analysis= {image_path}")
 
 
 if __name__ == "__main__":
