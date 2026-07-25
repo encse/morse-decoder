@@ -1,4 +1,4 @@
-"""Upload morse.zip as a new version of a private Kaggle Dataset."""
+"""Build and upload morse.zip as a new version of a private Kaggle Dataset."""
 
 from __future__ import annotations
 
@@ -12,6 +12,64 @@ from pathlib import Path
 
 
 HANDLE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$")
+PROJECT_FILES = (
+    Path(".gitignore"),
+    Path("AGENTS.md"),
+    Path("README.md"),
+    Path("curriculum-plan.json"),
+    Path("generate_analysis.py"),
+    Path("kaggle_train.py"),
+    Path("pyproject.toml"),
+    Path("reference.wav"),
+    Path("upload_kaggle.py"),
+)
+PROJECT_SOURCE_PATTERNS = (
+    "src/morse_timing/*.py",
+    "tests/*.py",
+)
+
+
+def build_project_archive(project_directory: Path, archive_path: Path) -> None:
+    """Create a fresh source bundle at the requested archive path."""
+
+    project_directory = project_directory.resolve()
+    archive_path = archive_path.resolve()
+    selected_files: list[Path] = []
+    for relative_path in PROJECT_FILES:
+        source = project_directory / relative_path
+        if not source.is_file():
+            raise FileNotFoundError(f"Required bundle file not found: {source}")
+        selected_files.append(source)
+    for pattern in PROJECT_SOURCE_PATTERNS:
+        matches = sorted(project_directory.glob(pattern))
+        if not matches:
+            raise FileNotFoundError(f"No bundle files match: {pattern}")
+        selected_files.extend(path for path in matches if path.is_file())
+
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_file = tempfile.NamedTemporaryFile(
+        prefix=f".{archive_path.name}.",
+        suffix=".tmp",
+        dir=archive_path.parent,
+        delete=False,
+    )
+    temporary_path = Path(temporary_file.name)
+    temporary_file.close()
+    try:
+        with zipfile.ZipFile(
+            temporary_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        ) as archive:
+            archive.writestr("morse/", "")
+            for source in selected_files:
+                relative_path = source.relative_to(project_directory)
+                archive.write(source, Path("morse") / relative_path)
+        validate_archive(temporary_path)
+        temporary_path.replace(archive_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def validate_archive(path: Path) -> None:
@@ -69,7 +127,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--archive",
         type=Path,
         default=Path("morse.zip"),
-        help="Source archive to upload",
+        help="Archive path to rebuild and upload",
     )
     parser.add_argument(
         "--notes",
@@ -80,10 +138,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Validate and upload the source bundle, then print the notebook cell."""
+    """Build and upload the source bundle, then print the notebook cell."""
 
     args = build_argument_parser().parse_args(argv)
-    upload_archive(args.handle, args.archive.resolve(), args.notes)
+    archive_path = args.archive.resolve()
+    project_directory = Path(__file__).resolve().parent
+    build_project_archive(project_directory, archive_path)
+    print(f"built={archive_path}")
+    upload_archive(args.handle, archive_path, args.notes)
     print(f"uploaded=https://www.kaggle.com/datasets/{args.handle}")
     print("\nKaggle notebook bootstrap cell:\n")
     print(
