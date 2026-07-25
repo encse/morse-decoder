@@ -42,9 +42,7 @@ Training samples independently vary speed, carrier frequency, timing jitter,
 noise power, amplitude, fading, and keying edge duration. The effective ranges
 are saved in every checkpoint. Every generated word boundary is randomly
 rendered as either the standard seven-unit gap or a doubled fourteen-unit gap,
-without adding another output character. Noise-only samples with an empty CTC
-target are supported but disabled by default with
-`noise_only_probability = 0.0`.
+without adding another output character. 
 
 ## Setup and tests
 

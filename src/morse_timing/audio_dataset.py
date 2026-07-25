@@ -52,7 +52,7 @@ class Stage1DatasetConfig:
     doubled_space_probability: float = 0.5
     leading_silence_seconds: float = 0.7
     trailing_silence_seconds: float = 0.7
-    noise_only_probability: float = 0.0
+    noise_only_probability: float = 0.05
     min_noise_only_seconds: float = 2.0
     max_noise_only_seconds: float = 4.0
     min_noise_only_power: float = 1.0

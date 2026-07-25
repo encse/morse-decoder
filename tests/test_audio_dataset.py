@@ -237,13 +237,20 @@ def test_generated_word_gaps_reproducibly_include_both_durations() -> None:
     ) == dataset._sample_doubled_word_gaps(7, "E E")
 
 
-def test_noise_only_samples_are_disabled_by_default() -> None:
+def test_noise_only_samples_default_value() -> None:
+
     dataset = CleanAudioMorseDataset(1, seed=41)
 
-    noise_only_count = sum(dataset._is_noise_only(index) for index in range(1_000))
+    sample_count = 10_000
+    noise_only_count = sum(
+        dataset._is_noise_only(index)
+        for index in range(sample_count)
+    )
 
-    assert dataset.config.noise_only_probability == 0.0
-    assert noise_only_count == 0
+    ratio = noise_only_count / sample_count
+
+    assert dataset.config.noise_only_probability == 0.05
+    assert 0.04 <= ratio <= 0.06
 
 
 def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:
