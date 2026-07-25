@@ -21,10 +21,10 @@ class AudioModelConfig:
     frequency_bins: int = 65
     first_conv_channels: int = 8
     second_conv_channels: int = 16
-    projection_size: int = 256
-    hidden_size: int = 256
+    projection_size: int = 384
+    hidden_size: int = 384
     num_gru_layers: int = 2
-    num_lstm_layers: int = 1
+    num_lstm_layers: int = 2
     dense_layers: int = 4
     bidirectional: bool = True
     sequence_model: str = "lstm"
