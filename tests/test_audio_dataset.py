@@ -30,6 +30,7 @@ def test_text_tokens_round_trip_through_deterministic_parser() -> None:
         AudioToken.DIT,
         AudioToken.DIT,
         AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
     )
     assert audio_tokens_to_morse(tokens) == ".- / -..."
     assert decode_audio_tokens(tokens).text == "A B"
@@ -63,6 +64,7 @@ def test_word_gap_follows_the_causal_character_boundary() -> None:
         AudioToken.END_WORD,
         AudioToken.DAH,
         AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
     )
     assert decode_audio_tokens(tokens).text == "E T"
 
@@ -131,7 +133,11 @@ def test_clean_audio_dataset_produces_model_ready_features() -> None:
 
     assert first.spectrogram.ndim == 2
     assert first.spectrogram.shape[1] == 65
-    assert first.targets.tolist() == [AudioToken.DIT, AudioToken.END_CHARACTER]
+    assert first.targets.tolist() == [
+        AudioToken.DIT,
+        AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
+    ]
     assert first.tone_activity.shape == (first.input_length,)
     assert torch.all((first.spectrogram >= 0.0) & (first.spectrogram <= 1.0))
     assert first.input_length > first.target_length
@@ -172,7 +178,7 @@ def test_audio_batch_padding_lengths_and_concatenated_targets() -> None:
         samples[0].input_length,
         samples[1].input_length,
     ]
-    assert batch.target_lengths.tolist() == [2, 12]
+    assert batch.target_lengths.tolist() == [3, 13]
     assert torch.equal(batch.targets, torch.cat([samples[0].targets, samples[1].targets]))
     assert batch.tone_activity.shape == batch.spectrograms.shape[:2]
     assert torch.all(batch.padding_mask[0, samples[0].input_length :])

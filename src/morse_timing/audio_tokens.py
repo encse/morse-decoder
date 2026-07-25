@@ -28,14 +28,14 @@ def text_to_audio_tokens(text: str) -> tuple[AudioToken, ...]:
     normalized = normalize_text(text)
     words = normalized.split(" ")
     tokens: list[AudioToken] = []
-    for word_index, word in enumerate(words):
+    for word in words:
         for character_index, character in enumerate(word):
             tokens.extend(
                 AudioToken.DIT if symbol == "." else AudioToken.DAH
                 for symbol in MORSE_TABLE[character]
             )
             tokens.append(AudioToken.END_CHARACTER)
-            if character_index == len(word) - 1 and word_index < len(words) - 1:
+            if character_index == len(word) - 1:
                 tokens.append(AudioToken.END_WORD)
     return tuple(tokens)
 
@@ -68,7 +68,7 @@ def audio_tokens_to_morse(tokens: Sequence[AudioToken | int]) -> str:
     if current_symbols:
         morse_groups.append("".join(current_symbols))
     if morse_groups and morse_groups[-1] == "/":
-        raise ValueError("Token sequence cannot end with END_WORD")
+        morse_groups.pop()
     return " ".join(morse_groups)
 
 
@@ -95,6 +95,8 @@ def format_audio_tokens_as_morse(tokens: Sequence[AudioToken | int]) -> str:
                 morse_groups.append("/")
     if current_symbols:
         morse_groups.append("".join(current_symbols))
+    if morse_groups and morse_groups[-1] == "/":
+        morse_groups.pop()
     return " ".join(morse_groups)
 
 

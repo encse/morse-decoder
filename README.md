@@ -71,7 +71,9 @@ dimension is selected reproducibly.
 
 Every stage, including the first one, uses the same model architecture and the
 same `CTC + tone activity` training loss. There is no separate base-model
-training phase.
+training phase. Every word, including the final word in a sample, ends with an
+`END_WORD` target. The batch decoder treats the final `END_WORD` as a
+terminator instead of rendering a trailing space.
 
 The optional top-level `reference_wav` path is decoded after every successfully
 completed stage. Its predicted Morse sequence and decoded text are printed for
