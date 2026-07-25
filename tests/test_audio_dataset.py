@@ -237,6 +237,50 @@ def test_generated_word_gaps_reproducibly_include_both_durations() -> None:
     ) == dataset._sample_doubled_word_gaps(7, "E E")
 
 
+def test_noise_only_samples_are_disabled_by_default() -> None:
+    dataset = CleanAudioMorseDataset(1, seed=41)
+
+    noise_only_count = sum(dataset._is_noise_only(index) for index in range(1_000))
+
+    assert dataset.config.noise_only_probability == 0.0
+    assert noise_only_count == 0
+
+
+def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:
+    config = Stage1DatasetConfig(
+        noise_only_probability=1.0,
+        min_noise_only_seconds=2.0,
+        max_noise_only_seconds=2.0,
+        noise_power=0.0,
+    )
+    dataset = CleanAudioMorseDataset(1, config, seed=41)
+
+    sample = dataset[0]
+
+    assert sample.text == ""
+    assert sample.targets.numel() == 0
+    assert sample.input_length == 100
+    assert torch.all(sample.tone_activity == 0.0)
+    assert torch.any(sample.spectrogram > 0.0)
+    assert torch.equal(sample.spectrogram, dataset[0].spectrogram)
+
+
+def test_explicit_text_samples_are_not_replaced_with_noise_only_samples() -> None:
+    sample = CleanAudioMorseDataset(
+        1,
+        Stage1DatasetConfig(noise_only_probability=1.0),
+        seed=41,
+        texts=["E"],
+    )[0]
+
+    assert sample.text == "E"
+    assert sample.targets.tolist() == [
+        AudioToken.DIT,
+        AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
+    ]
+
+
 def test_dataset_is_reproducible_by_seed_and_index() -> None:
     first = CleanAudioMorseDataset(3, seed=123)[2]
     second = CleanAudioMorseDataset(3, seed=123)[2]

@@ -2,7 +2,11 @@ import torch
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
-from morse_timing.audio_dataset import CleanAudioMorseDataset, collate_audio_sequences
+from morse_timing.audio_dataset import (
+    CleanAudioMorseDataset,
+    Stage1DatasetConfig,
+    collate_audio_sequences,
+)
 from morse_timing.audio_model import AudioModelConfig, MorseAudioCTCModel
 from morse_timing.audio_tokens import AudioToken
 from morse_timing.audio_train import (
@@ -59,6 +63,37 @@ def test_one_training_epoch_updates_the_audio_model() -> None:
     assert torch.isfinite(torch.tensor(loss))
     assert not torch.equal(original, model.classifier.weight)
     assert model.tone_activity_head.weight.grad is not None
+
+
+def test_noise_only_batch_with_empty_ctc_targets_can_be_trained() -> None:
+    dataset = CleanAudioMorseDataset(
+        2,
+        Stage1DatasetConfig(
+            noise_only_probability=1.0,
+            min_noise_only_seconds=0.5,
+            max_noise_only_seconds=0.5,
+        ),
+        seed=7,
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=2,
+        collate_fn=collate_audio_sequences,
+    )
+    model = MorseAudioCTCModel(
+        AudioModelConfig(
+            first_conv_channels=2,
+            second_conv_channels=4,
+            projection_size=8,
+            hidden_size=8,
+            num_gru_layers=1,
+        )
+    )
+    optimizer = AdamW(model.parameters(), lr=1e-3)
+
+    loss = train_epoch(model, loader, optimizer, torch.device("cpu"), 5.0, 0)
+
+    assert torch.isfinite(torch.tensor(loss))
 
 
 def test_concatenated_targets_are_split_per_sample() -> None:
