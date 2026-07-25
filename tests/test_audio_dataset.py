@@ -3,6 +3,7 @@ import torch
 from morse_timing.audio_dataset import (
     CleanAudioMorseDataset,
     Stage1DatasetConfig,
+    build_audio_sequence_sample,
     collate_audio_sequences,
 )
 from morse_timing.audio_tokens import (
@@ -198,6 +199,42 @@ def test_tone_activity_marks_frames_that_overlap_the_tone() -> None:
 
     assert sample.tone_activity[:3].tolist() == [1.0, 1.0, 1.0]
     assert sample.tone_activity[3:].sum() == 0.0
+
+
+def test_doubled_word_gap_changes_only_audio_duration_not_the_ctc_target() -> None:
+    config = Stage1DatasetConfig(
+        wpm=20.0,
+        leading_silence_seconds=0.0,
+        trailing_silence_seconds=0.0,
+    )
+    normal = build_audio_sequence_sample(
+        "E E",
+        config,
+        doubled_word_gaps=(False,),
+    )
+    doubled = build_audio_sequence_sample(
+        "E E",
+        config,
+        doubled_word_gaps=(True,),
+    )
+
+    assert doubled.input_length - normal.input_length == 21
+    assert torch.equal(doubled.targets, normal.targets)
+    assert doubled.text == normal.text == "E E"
+
+
+def test_generated_word_gaps_reproducibly_include_both_durations() -> None:
+    dataset = CleanAudioMorseDataset(1, seed=123)
+    sampled = {
+        doubled
+        for index in range(100)
+        for doubled in dataset._sample_doubled_word_gaps(index, "E E E")
+    }
+
+    assert sampled == {False, True}
+    assert dataset._sample_doubled_word_gaps(
+        7, "E E"
+    ) == dataset._sample_doubled_word_gaps(7, "E E")
 
 
 def test_dataset_is_reproducible_by_seed_and_index() -> None:

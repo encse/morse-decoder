@@ -49,6 +49,7 @@ class Stage1DatasetConfig:
     max_characters: int = 12
     space_probability: float = 0.12
     word_boundary_sample_probability: float = 0.5
+    doubled_space_probability: float = 0.5
     leading_silence_seconds: float = 0.7
     trailing_silence_seconds: float = 0.7
     audio: AudioConfig = AudioConfig()
@@ -81,6 +82,8 @@ class Stage1DatasetConfig:
             raise ValueError(
                 "Word-boundary sample probability must be between zero and one"
             )
+        if not 0.0 <= self.doubled_space_probability <= 1.0:
+            raise ValueError("Doubled-space probability must be between zero and one")
         if self.timing_jitter < 0.0:
             raise ValueError("Timing jitter cannot be negative")
         if self.noise_power < 0.0:
@@ -195,6 +198,26 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             fade_frequency_hz=self._sample_fade_frequency(index),
             fade_phase_radians=self._sample_fade_phase(index),
             rise_fall_ms=self._sample_rise_fall(index),
+            doubled_word_gaps=(
+                None
+                if self.texts is not None
+                else self._sample_doubled_word_gaps(index, text)
+            ),
+        )
+
+    def _sample_doubled_word_gaps(
+        self,
+        index: int,
+        text: str,
+    ) -> tuple[bool, ...]:
+        """Choose normal or doubled duration for every generated word boundary."""
+
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 12]).generate_state(1)[0])
+        )
+        return tuple(
+            bool(rng.random() < self.config.doubled_space_probability)
+            for _ in range(text.count(" "))
         )
 
     def _sample_rise_fall(self, index: int) -> float:
@@ -378,6 +401,7 @@ def build_audio_sequence_sample(
     fade_frequency_hz: float | None = None,
     fade_phase_radians: float = 0.0,
     rise_fall_ms: float | None = None,
+    doubled_word_gaps: Sequence[bool] | None = None,
 ) -> AudioSequenceSample:
     """Create one model-ready clean audio sample from caller-supplied text."""
 
@@ -401,6 +425,7 @@ def build_audio_sequence_sample(
         audio_config,
         timing_jitter=selected_config.timing_jitter,
         rng=np.random.default_rng(timing_seed),
+        doubled_word_gaps=doubled_word_gaps,
     )
     leading_samples = round(
         selected_config.leading_silence_seconds * audio_config.sample_rate

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import wave
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,11 +51,24 @@ class RenderedSegment:
     end_sample: int
 
 
-def text_to_segments(text: str) -> tuple[AudioSegment, ...]:
-    """Convert text to ideal 1:3:7 Morse tone and gap segments."""
+def text_to_segments(
+    text: str,
+    doubled_word_gaps: Sequence[bool] | None = None,
+) -> tuple[AudioSegment, ...]:
+    """Convert text to Morse segments with optionally doubled word gaps."""
 
     normalized = normalize_text(text)
     words = normalized.split(" ")
+    boundary_count = len(words) - 1
+    selected_gaps = (
+        (False,) * boundary_count
+        if doubled_word_gaps is None
+        else tuple(doubled_word_gaps)
+    )
+    if len(selected_gaps) != boundary_count:
+        raise ValueError(
+            f"Expected {boundary_count} word gaps, got {len(selected_gaps)}"
+        )
     segments: list[AudioSegment] = []
     for word_index, word in enumerate(words):
         for character_index, character in enumerate(word):
@@ -66,7 +80,12 @@ def text_to_segments(text: str) -> tuple[AudioSegment, ...]:
             if character_index < len(word) - 1:
                 segments.append(AudioSegment(is_tone=False, units=3))
             elif word_index < len(words) - 1:
-                segments.append(AudioSegment(is_tone=False, units=7))
+                segments.append(
+                    AudioSegment(
+                        is_tone=False,
+                        units=14 if selected_gaps[word_index] else 7,
+                    )
+                )
             else:
                 segments.append(AudioSegment(is_tone=False, units=3))
     return tuple(segments)
@@ -80,6 +99,7 @@ def synthesize_morse(
     timing_jitter: float = 0.0,
     rng: np.random.Generator | None = None,
     carrier_phase_radians: float | None = None,
+    doubled_word_gaps: Sequence[bool] | None = None,
 ) -> NDArray[np.float32]:
     """Synthesize clean Morse audio using the standard 1.2/WPM dit duration."""
 
@@ -90,6 +110,7 @@ def synthesize_morse(
         timing_jitter=timing_jitter,
         rng=rng,
         carrier_phase_radians=carrier_phase_radians,
+        doubled_word_gaps=doubled_word_gaps,
     )
     return waveform
 
@@ -102,6 +123,7 @@ def synthesize_morse_with_timing(
     timing_jitter: float = 0.0,
     rng: np.random.Generator | None = None,
     carrier_phase_radians: float | None = None,
+    doubled_word_gaps: Sequence[bool] | None = None,
 ) -> tuple[NDArray[np.float32], tuple[RenderedSegment, ...]]:
     """Synthesize Morse and return exact boundaries for supervised events."""
 
@@ -132,7 +154,7 @@ def synthesize_morse_with_timing(
         )
         return max(1, round(multiplier * base_samples * scale))
 
-    for segment in text_to_segments(text):
+    for segment in text_to_segments(text, doubled_word_gaps):
         sample_count = dot_samples(segment.units)
         if segment.is_tone:
             chunks.append(
