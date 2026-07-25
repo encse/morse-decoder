@@ -58,6 +58,19 @@ def test_text_to_segments_uses_ideal_morse_ratios() -> None:
     ]
 
 
+def test_existing_word_gap_can_be_randomized_to_twice_its_normal_duration() -> None:
+    normal = text_to_segments("E E", (False,))
+    doubled = text_to_segments("E E", (True,))
+
+    normal_gap = next(segment for segment in normal if not segment.is_tone and segment.units > 3)
+    doubled_gap = next(
+        segment for segment in doubled if not segment.is_tone and segment.units > 3
+    )
+
+    assert normal_gap.units == 7
+    assert doubled_gap.units == 14
+
+
 def test_synthesis_has_exact_expected_duration_and_bounded_amplitude() -> None:
     config = AudioConfig(sample_rate=8_000, frequency_hz=700.0, amplitude=0.5)
     samples = synthesize_morse("E", wpm=20.0, config=config)

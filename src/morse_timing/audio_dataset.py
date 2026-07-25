@@ -21,7 +21,11 @@ from morse_timing.audio import (
     apply_sinusoidal_fading,
     synthesize_morse_with_timing,
 )
-from morse_timing.audio_tokens import AudioToken, text_to_audio_tokens
+from morse_timing.audio_tokens import (
+    NUM_AUDIO_TOKENS,
+    AudioToken,
+    text_to_audio_tokens,
+)
 from morse_timing.morse import SUPPORTED_CHARACTERS, normalize_text
 from morse_timing.spectrogram import SpectrogramConfig, compute_log_magnitude_stft
 
@@ -49,8 +53,13 @@ class Stage1DatasetConfig:
     max_characters: int = 12
     space_probability: float = 0.12
     word_boundary_sample_probability: float = 0.5
+    doubled_space_probability: float = 0.5
     leading_silence_seconds: float = 0.7
     trailing_silence_seconds: float = 0.7
+    noise_only_probability: float = 0.0
+    min_noise_only_seconds: float = 2.0
+    max_noise_only_seconds: float = 4.0
+    min_noise_only_power: float = 1.0
     audio: AudioConfig = AudioConfig()
     spectrogram: SpectrogramConfig = SpectrogramConfig()
 
@@ -81,6 +90,8 @@ class Stage1DatasetConfig:
             raise ValueError(
                 "Word-boundary sample probability must be between zero and one"
             )
+        if not 0.0 <= self.doubled_space_probability <= 1.0:
+            raise ValueError("Doubled-space probability must be between zero and one")
         if self.timing_jitter < 0.0:
             raise ValueError("Timing jitter cannot be negative")
         if self.noise_power < 0.0:
@@ -103,6 +114,15 @@ class Stage1DatasetConfig:
             raise ValueError("Rise/fall range must be non-negative and ordered")
         if self.leading_silence_seconds < 0.0 or self.trailing_silence_seconds < 0.0:
             raise ValueError("Leading and trailing silence cannot be negative")
+        if not 0.0 <= self.noise_only_probability <= 1.0:
+            raise ValueError("Noise-only probability must be between zero and one")
+        if (
+            self.min_noise_only_seconds <= 0.0
+            or self.max_noise_only_seconds < self.min_noise_only_seconds
+        ):
+            raise ValueError("Noise-only duration range must be positive and ordered")
+        if self.min_noise_only_power <= 0.0:
+            raise ValueError("Minimum noise-only power must be positive")
 
 
 @dataclass(frozen=True)
@@ -112,6 +132,7 @@ class AudioSequenceSample:
     spectrogram: Tensor
     targets: Tensor
     tone_activity: Tensor
+    event_timing_targets: Tensor
     text: str
 
     @property
@@ -130,6 +151,7 @@ class AudioBatch:
     spectrograms: Tensor
     targets: Tensor
     tone_activity: Tensor
+    event_timing_targets: Tensor
     input_lengths: Tensor
     target_lengths: Tensor
     padding_mask: Tensor
@@ -142,6 +164,7 @@ class AudioBatch:
             spectrograms=self.spectrograms.to(device),
             targets=self.targets.to(device),
             tone_activity=self.tone_activity.to(device),
+            event_timing_targets=self.event_timing_targets.to(device),
             input_lengths=self.input_lengths.to(device),
             target_lengths=self.target_lengths.to(device),
             padding_mask=self.padding_mask.to(device),
@@ -176,6 +199,19 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             index += self.size
         if index < 0 or index >= self.size:
             raise IndexError(index)
+        if self.texts is None and self._is_noise_only(index):
+            return build_noise_only_sequence_sample(
+                self.config,
+                duration_seconds=self._sample_noise_only_duration(index),
+                noise_seed=int(
+                    np.random.SeedSequence([self.seed, index, 4]).generate_state(1)[0]
+                ),
+                noise_power=max(
+                    self.config.min_noise_only_power,
+                    self._sample_noise_power(index),
+                ),
+                amplitude_percent=self._sample_amplitude_percent(index),
+            )
         text = self.texts[index] if self.texts is not None else self._random_text(index)
         return build_audio_sequence_sample(
             text,
@@ -195,6 +231,45 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             fade_frequency_hz=self._sample_fade_frequency(index),
             fade_phase_radians=self._sample_fade_phase(index),
             rise_fall_ms=self._sample_rise_fall(index),
+            doubled_word_gaps=(
+                None
+                if self.texts is not None
+                else self._sample_doubled_word_gaps(index, text)
+            ),
+        )
+
+    def _is_noise_only(self, index: int) -> bool:
+        """Select reproducible negative examples without affecting text sampling."""
+
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 13]).generate_state(1)[0])
+        )
+        return bool(rng.random() < self.config.noise_only_probability)
+
+    def _sample_noise_only_duration(self, index: int) -> float:
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 14]).generate_state(1)[0])
+        )
+        return float(
+            rng.uniform(
+                self.config.min_noise_only_seconds,
+                self.config.max_noise_only_seconds,
+            )
+        )
+
+    def _sample_doubled_word_gaps(
+        self,
+        index: int,
+        text: str,
+    ) -> tuple[bool, ...]:
+        """Choose normal or doubled duration for every generated word boundary."""
+
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 12]).generate_state(1)[0])
+        )
+        return tuple(
+            bool(rng.random() < self.config.doubled_space_probability)
+            for _ in range(text.count(" "))
         )
 
     def _sample_rise_fall(self, index: int) -> float:
@@ -363,6 +438,73 @@ def build_tone_activity(
     return tone_activity
 
 
+def build_event_timing_targets(
+    rendered_segments: Sequence[RenderedSegment],
+    targets: Sequence[AudioToken | int],
+    frame_count: int,
+    leading_samples: int,
+    spectrogram_config: SpectrogramConfig,
+) -> Tensor:
+    """Place every output event at its earliest causally justified frame."""
+
+    event_targets = torch.zeros(
+        (frame_count, NUM_AUDIO_TOKENS),
+        dtype=torch.bool,
+    )
+    selected_targets = tuple(AudioToken(target) for target in targets)
+    target_index = 0
+    hop_length = spectrogram_config.hop_length
+
+    def mark(token: AudioToken, sample_position: float) -> None:
+        frame = min(
+            frame_count - 1,
+            max(0, int(np.ceil((leading_samples + sample_position) / hop_length))),
+        )
+        event_targets[frame, int(token)] = True
+
+    for segment_index, rendered in enumerate(rendered_segments):
+        if not rendered.segment.is_tone:
+            continue
+        if target_index >= len(selected_targets):
+            raise ValueError("Rendered tones outnumber DIT/DAH targets")
+        symbol = selected_targets[target_index]
+        if symbol not in {AudioToken.DIT, AudioToken.DAH}:
+            raise ValueError("Every rendered tone must map to a DIT or DAH target")
+        mark(symbol, rendered.end_sample)
+        target_index += 1
+
+        if segment_index + 1 >= len(rendered_segments):
+            raise ValueError("Every rendered tone must be followed by silence")
+        silence = rendered_segments[segment_index + 1]
+        if silence.segment.is_tone:
+            raise ValueError("Every rendered tone must be followed by silence")
+        unit_samples = (
+            silence.end_sample - silence.start_sample
+        ) / silence.segment.units
+        if (
+            target_index < len(selected_targets)
+            and selected_targets[target_index] is AudioToken.END_CHARACTER
+        ):
+            mark(
+                AudioToken.END_CHARACTER,
+                silence.start_sample + unit_samples,
+            )
+            target_index += 1
+        if (
+            target_index < len(selected_targets)
+            and selected_targets[target_index] is AudioToken.END_WORD
+        ):
+            mark(
+                AudioToken.END_WORD,
+                silence.start_sample + 3.0 * unit_samples,
+            )
+            target_index += 1
+
+    if target_index != len(selected_targets):
+        raise ValueError("Not every output target was assigned a timing frame")
+    return event_targets
+
+
 def build_audio_sequence_sample(
     text: str,
     config: Stage1DatasetConfig | None = None,
@@ -378,6 +520,7 @@ def build_audio_sequence_sample(
     fade_frequency_hz: float | None = None,
     fade_phase_radians: float = 0.0,
     rise_fall_ms: float | None = None,
+    doubled_word_gaps: Sequence[bool] | None = None,
 ) -> AudioSequenceSample:
     """Create one model-ready clean audio sample from caller-supplied text."""
 
@@ -401,6 +544,7 @@ def build_audio_sequence_sample(
         audio_config,
         timing_jitter=selected_config.timing_jitter,
         rng=np.random.default_rng(timing_seed),
+        doubled_word_gaps=doubled_word_gaps,
     )
     leading_samples = round(
         selected_config.leading_silence_seconds * audio_config.sample_rate
@@ -467,15 +611,64 @@ def build_audio_sequence_sample(
         leading_samples,
         selected_config.spectrogram,
     )
+    audio_tokens = text_to_audio_tokens(normalized_text)
     targets = torch.tensor(
-        [int(token) for token in text_to_audio_tokens(normalized_text)],
+        [int(token) for token in audio_tokens],
         dtype=torch.long,
+    )
+    event_timing_targets = build_event_timing_targets(
+        rendered_segments,
+        audio_tokens,
+        features.shape[0],
+        leading_samples,
+        selected_config.spectrogram,
     )
     return AudioSequenceSample(
         spectrogram=features,
         targets=targets,
         tone_activity=tone_activity,
+        event_timing_targets=event_timing_targets,
         text=normalized_text,
+    )
+
+
+def build_noise_only_sequence_sample(
+    config: Stage1DatasetConfig,
+    *,
+    duration_seconds: float,
+    noise_seed: int,
+    noise_power: float,
+    amplitude_percent: float,
+) -> AudioSequenceSample:
+    """Create a negative example containing noise without any Morse signal."""
+
+    sample_count = round(duration_seconds * config.audio.sample_rate)
+    waveform = np.zeros(sample_count, dtype=np.float32)
+    waveform = add_power_scaled_noise(
+        waveform,
+        config.audio.sample_rate,
+        noise_power,
+        np.random.default_rng(noise_seed),
+    )
+    waveform = apply_recording_amplitude(waveform, amplitude_percent)
+    spectrogram = compute_log_magnitude_stft(
+        torch.from_numpy(waveform),
+        config.audio.sample_rate,
+        config.spectrogram,
+    )
+    features = prepare_spectrogram_features(
+        spectrogram.values,
+        config.spectrogram,
+    ).transpose(0, 1).contiguous()
+    return AudioSequenceSample(
+        spectrogram=features,
+        targets=torch.empty(0, dtype=torch.long),
+        tone_activity=torch.zeros(features.shape[0], dtype=torch.float32),
+        event_timing_targets=torch.zeros(
+            (features.shape[0], NUM_AUDIO_TOKENS),
+            dtype=torch.bool,
+        ),
+        text="",
     )
 
 
@@ -522,12 +715,18 @@ def collate_audio_sequences(samples: Sequence[AudioSequenceSample]) -> AudioBatc
         batch_first=True,
         padding_value=0.0,
     )
+    event_timing_targets = pad_sequence(
+        [sample.event_timing_targets for sample in samples],
+        batch_first=True,
+        padding_value=False,
+    )
     positions = torch.arange(spectrograms.shape[1]).unsqueeze(0)
     padding_mask = positions >= input_lengths.unsqueeze(1)
     return AudioBatch(
         spectrograms=spectrograms,
         targets=targets,
         tone_activity=tone_activity,
+        event_timing_targets=event_timing_targets,
         input_lengths=input_lengths,
         target_lengths=target_lengths,
         padding_mask=padding_mask,

@@ -31,16 +31,24 @@ python generate_analysis.py
 text
   -> Morse timing and waveform synthesis at 8 kHz
   -> 20 ms, 65-bin linear-power STFT frames
-  -> frequency convolution and dense frame projection
-  -> stateful LSTM
+  -> four 384-unit dense frame projections
+  -> two-layer, 384-unit stateful LSTM
   -> CTC logits
   -> DIT / DAH / character boundary / word boundary
   -> decoded text
 ```
 
+The default LSTM has approximately 2.84 million parameters. It is
+unidirectional so the same recurrent state can be reused for streaming
+inference.
+
 Training samples independently vary speed, carrier frequency, timing jitter,
 noise power, amplitude, fading, and keying edge duration. The effective ranges
-are saved in every checkpoint.
+are saved in every checkpoint. Every generated word boundary is randomly
+rendered as either the standard seven-unit gap or a doubled fourteen-unit gap,
+without adding another output character. Noise-only samples with an empty CTC
+target are supported but disabled by default with
+`noise_only_probability = 0.0`.
 
 ## Setup and tests
 
@@ -70,8 +78,23 @@ number of epochs. A failed dimension is set aside and another unfinished
 dimension is selected reproducibly.
 
 Every stage, including the first one, uses the same model architecture and the
-same `CTC + tone activity` training loss. There is no separate base-model
-training phase.
+same `CTC + 0.3 × tone activity + 0.3 × event timing` training loss. The
+auxiliary head predicts whether each input frame overlaps a Morse tone and is
+not used for inference. Timing targets place DIT/DAH at the first frame after a
+tone, `END_CHARACTER` after one dit of confirmed silence, and `END_WORD` after
+three dits of confirmed silence, including after the final word. To let the
+model estimate the signal speed before exact event timing is enforced, the
+timing loss applies only to the second half of samples containing at least ten
+DIT/DAH events. The first half and shorter samples still train with CTC and
+tone activity. Inside the supervised region, early, late, and repeated
+emissions are penalized and each of the four event token classes contributes
+equally. A doubled word gap does not delay either boundary target. The batch
+decoder treats the final `END_WORD` as a terminator instead of rendering a
+trailing space. There is no separate base-model training phase.
+
+Training and validation logs report the unweighted `ctc_loss`,
+`tone_activity_loss`, and `event_timing_loss` separately in addition to their
+weighted total.
 
 The optional top-level `reference_wav` path is decoded after every successfully
 completed stage. Its predicted Morse sequence and decoded text are printed for
@@ -132,9 +155,12 @@ Start or resume the configured curriculum:
 
 If the output directory already contains the named curriculum state, the
 launcher resumes it. Use an empty output directory to start the curriculum
-from its exact center values.
+from its exact center values. By default the Kaggle launcher generates 5,000
+training and 500 validation samples per dataset refresh. Override these with
+`--train-samples` and `--validation-samples`. Direct local curriculum runs use
+the values in `curriculum-plan.json`, currently 10,000 and 1,000.
 
-### Load the source bundle and models
+### Load the source bundle
 
 Upload the current bundle as a new private Kaggle Dataset version:
 
@@ -143,9 +169,12 @@ conda activate morse
 python upload_kaggle.py <yourname>/morsestuff --archive morse.zip
 ```
 
-Use this as the first notebook cell. The current bundle contains `morse/` for
-source and `models/` for checkpoints, so both are extracted directly below
-`/kaggle/working`.
+The uploader first rebuilds `morse.zip` at the selected `--archive` path from
+the current project sources, validates it, and only then uploads it. Models and
+generated audio are excluded; `reference.wav` is included.
+
+Use this as the first notebook cell. The uploaded archive extracts `morse/`
+directly below `/kaggle/working`.
 
 ```python
 import kagglehub
@@ -156,7 +185,6 @@ import zipfile
 
 working_dir = pathlib.Path("/kaggle/working")
 project_dir = working_dir / "morse"
-models_dir = working_dir / "models"
 
 dataset_dir = pathlib.Path(
     kagglehub.dataset_download(
@@ -167,8 +195,6 @@ dataset_dir = pathlib.Path(
 
 if project_dir.exists():
     shutil.rmtree(project_dir)
-if models_dir.exists():
-    shutil.rmtree(models_dir)
 
 archives = list(dataset_dir.rglob("morse.zip"))
 if not archives:
@@ -179,13 +205,8 @@ with zipfile.ZipFile(archives[0]) as archive:
 
 if not (project_dir / "pyproject.toml").is_file():
     raise RuntimeError(f"Invalid project bundle: {project_dir}")
-if not models_dir.is_dir():
-    raise RuntimeError(f"Missing model directory: {models_dir}")
 
 print("project:", project_dir)
-for model_file in sorted(models_dir.rglob("*")):
-    if model_file.is_file():
-        print("model file:", model_file.relative_to(models_dir))
 
 os.chdir(project_dir)
 ```

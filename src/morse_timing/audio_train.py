@@ -43,9 +43,33 @@ class OverfitMetrics:
     example_reference: str
     example_prediction: str
     ctc_loss: float = 0.0
+    tone_activity_loss: float = 0.0
+    event_timing_loss: float = 0.0
+
+
+class TrainingLoss(float):
+    """Backward-compatible scalar epoch loss with unweighted components."""
+
+    ctc_loss: float
+    tone_activity_loss: float
+    event_timing_loss: float
+
+    def __new__(
+        cls,
+        loss: float,
+        ctc_loss: float,
+        tone_activity_loss: float,
+        event_timing_loss: float,
+    ) -> TrainingLoss:
+        value = super().__new__(cls, loss)
+        value.ctc_loss = ctc_loss
+        value.tone_activity_loss = tone_activity_loss
+        value.event_timing_loss = event_timing_loss
+        return value
 
 
 TONE_ACTIVITY_LOSS_WEIGHT = 0.3
+EVENT_TIMING_LOSS_WEIGHT = 0.3
 
 
 def select_device(requested: str) -> torch.device:
@@ -145,10 +169,13 @@ def train_epoch(
     gradient_clip: float,
     log_interval: int,
     profile_batches: int = 0,
-) -> float:
+) -> TrainingLoss:
     """Optimize the model once with the fixed curriculum objective."""
     model.train()
     total_loss = 0.0
+    total_ctc_loss = 0.0
+    total_tone_activity_loss = 0.0
+    total_event_timing_loss = 0.0
     total_samples = 0
     started_at = perf_counter()
     profile_totals = {
@@ -202,15 +229,16 @@ def train_epoch(
             )
             tone_logits = model.classify_auxiliary(recurrent_output)
             output_lengths = batch.input_lengths
-            loss = timed(
+            components = timed(
                 "loss",
-                lambda: _training_loss(
+                lambda: _training_loss_components(
                     logits,
                     output_lengths,
                     batch,
                     tone_logits,
                 ),
             )
+            loss = components[0]
             timed("backward", loss.backward)
         else:
             batch = cpu_batch.to(device)
@@ -219,12 +247,13 @@ def train_epoch(
                 batch.spectrograms,
                 batch.input_lengths,
             )
-            loss = _training_loss(
+            components = _training_loss_components(
                 logits,
                 output_lengths,
                 batch,
                 tone_logits,
             )
+            loss = components[0]
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
         if profiling:
@@ -233,6 +262,9 @@ def train_epoch(
             optimizer.step()
         batch_size = len(batch.texts)
         total_loss += float(loss.detach()) * batch_size
+        total_ctc_loss += float(components[1].detach()) * batch_size
+        total_tone_activity_loss += float(components[2].detach()) * batch_size
+        total_event_timing_loss += float(components[3].detach()) * batch_size
         total_samples += batch_size
         if log_interval > 0 and (
             batch_index % log_interval == 0 or batch_index == len(loader)
@@ -240,6 +272,11 @@ def train_epoch(
             print(
                 f"  batch={batch_index}/{len(loader)} "
                 f"loss={total_loss / total_samples:.5f} "
+                f"ctc_loss={total_ctc_loss / total_samples:.5f} "
+                f"tone_activity_loss="
+                f"{total_tone_activity_loss / total_samples:.5f} "
+                f"event_timing_loss="
+                f"{total_event_timing_loss / total_samples:.5f} "
                 f"elapsed={perf_counter() - started_at:.1f}s",
                 flush=True,
             )
@@ -252,7 +289,12 @@ def train_epoch(
                 f"  {name}={total_seconds * 1_000.0 / measured_batches:.2f}",
                 flush=True,
             )
-    return total_loss / total_samples
+    return TrainingLoss(
+        total_loss / total_samples,
+        total_ctc_loss / total_samples,
+        total_tone_activity_loss / total_samples,
+        total_event_timing_loss / total_samples,
+    )
 
 
 @torch.inference_mode()
@@ -265,6 +307,8 @@ def evaluate_overfit_dataset(
     model.eval()
     total_loss = 0.0
     total_ctc_loss = 0.0
+    total_tone_activity_loss = 0.0
+    total_event_timing_loss = 0.0
     sample_count = 0
     token_edits = 0
     target_token_count = 0
@@ -286,17 +330,20 @@ def evaluate_overfit_dataset(
             output_lengths,
             batch.target_lengths,
         )
-        loss = _training_loss(
+        components = _training_loss_components(
             logits,
             output_lengths,
             batch,
             tone_logits,
             ctc_loss,
         )
+        loss = components[0]
         predictions = greedy_decode_batch(logits, output_lengths)
         references = split_concatenated_targets(batch.targets, batch.target_lengths)
         total_loss += float(loss.detach()) * len(batch.texts)
         total_ctc_loss += float(ctc_loss.detach()) * len(batch.texts)
+        total_tone_activity_loss += float(components[2].detach()) * len(batch.texts)
+        total_event_timing_loss += float(components[3].detach()) * len(batch.texts)
         sample_count += len(batch.texts)
         for text, reference, prediction in zip(
             batch.texts, references, predictions, strict=True
@@ -328,6 +375,8 @@ def evaluate_overfit_dataset(
         example_reference=example_reference,
         example_prediction=example_prediction,
         ctc_loss=total_ctc_loss / sample_count,
+        tone_activity_loss=total_tone_activity_loss / sample_count,
+        event_timing_loss=total_event_timing_loss / sample_count,
     )
 
 
@@ -338,7 +387,25 @@ def _training_loss(
     tone_activity_logits: Tensor,
     ctc_loss: Tensor | None = None,
 ) -> Tensor:
-    """Calculate the fixed CTC plus tone-activity training objective."""
+    """Calculate the fixed CTC and frame-level auxiliary objectives."""
+
+    return _training_loss_components(
+        logits,
+        output_lengths,
+        batch,
+        tone_activity_logits,
+        ctc_loss,
+    )[0]
+
+
+def _training_loss_components(
+    logits: Tensor,
+    output_lengths: Tensor,
+    batch: AudioBatch,
+    tone_activity_logits: Tensor,
+    ctc_loss: Tensor | None = None,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Return total loss followed by its three unweighted components."""
 
     if ctc_loss is None:
         ctc_loss = compute_ctc_loss(
@@ -353,8 +420,154 @@ def _training_loss(
         batch.tone_activity,
         reduction="none",
     )[valid].mean()
-    return ctc_loss + TONE_ACTIVITY_LOSS_WEIGHT * tone_loss.to(ctc_loss.device)
+    timing_loss = event_timing_loss(
+        logits,
+        batch.event_timing_targets,
+        batch.padding_mask,
+    )
+    total_loss = (
+        ctc_loss
+        + TONE_ACTIVITY_LOSS_WEIGHT * tone_loss.to(ctc_loss.device)
+        + EVENT_TIMING_LOSS_WEIGHT * timing_loss.to(ctc_loss.device)
+    )
+    return total_loss, ctc_loss, tone_loss, timing_loss
 
+
+def event_timing_loss(
+    logits: Tensor,
+    timing_targets: Tensor,
+    padding_mask: Tensor,
+) -> Tensor:
+    """Apply timing supervision to the second half of samples with enough Morse events."""
+
+    if timing_targets.shape != logits.shape:
+        raise ValueError("Timing targets must match the frame logits")
+
+    expected = timing_targets.to(dtype=torch.bool).clone()
+    expected[..., int(AudioToken.CTC_BLANK)] = False
+
+    frame_count = logits.shape[1]
+    frame_positions = torch.arange(
+        frame_count,
+        device=logits.device,
+    ).view(1, -1)
+
+    valid_frames = ~padding_mask
+    valid_lengths = valid_frames.sum(dim=1)
+
+    morse_event_count = (
+        expected[..., int(AudioToken.DIT)].sum(dim=1)
+        + expected[..., int(AudioToken.DAH)].sum(dim=1)
+    )
+
+    eligible_samples = morse_event_count >= 10
+    supervised_starts = valid_lengths // 2
+
+    supervised_frames = (
+        valid_frames
+        & eligible_samples.unsqueeze(1)
+        & (frame_positions >= supervised_starts.unsqueeze(1))
+    )
+
+    expected &= supervised_frames.unsqueeze(-1)
+
+    if not torch.any(expected):
+        return logits.sum() * 0.0
+
+    event_probabilities = logits.softmax(dim=-1)
+    previous_probabilities = F.pad(
+        event_probabilities[:, :-1],
+        (0, 0, 1, 0),
+        value=0.0,
+    )
+    event_onsets = event_probabilities * (1.0 - previous_probabilities)
+
+    nonblank = torch.ones(
+        logits.shape[-1],
+        dtype=torch.bool,
+        device=logits.device,
+    )
+    nonblank[int(AudioToken.CTC_BLANK)] = False
+
+    valid = (
+        supervised_frames.unsqueeze(-1)
+        & nonblank.view(1, 1, -1)
+    )
+
+    unexpected = valid & ~expected
+
+    positions = frame_positions.unsqueeze(-1)
+
+    missing_position = torch.full_like(
+        positions,
+        -frame_count,
+    ).expand_as(expected)
+
+    previous_targets = torch.where(
+        expected,
+        positions,
+        missing_position,
+    ).cummax(dim=1).values
+
+    next_candidates = torch.where(
+        expected,
+        positions,
+        torch.full_like(
+            positions,
+            frame_count,
+        ).expand_as(expected),
+    )
+
+    next_targets = torch.flip(
+        torch.flip(next_candidates, dims=(1,))
+        .cummin(dim=1)
+        .values,
+        dims=(1,),
+    )
+
+    distances = torch.minimum(
+        (positions - previous_targets).abs(),
+        (next_targets - positions).abs(),
+    ).clamp_max(frame_count)
+
+    distance_weights = (
+        1.0
+        + distances.to(logits.dtype)
+        / max(1, frame_count - 1)
+    )
+
+    positive_terms = (
+        -event_onsets.clamp_min(1e-6).log()
+        * expected
+    )
+
+    negative_terms = (
+        -torch.log1p(
+            -event_onsets.clamp_max(1.0 - 1e-6)
+        )
+        * event_onsets.square()
+        * unexpected
+    )
+
+    reduction_dimensions = (0, 1)
+
+    positive_counts = expected.sum(dim=reduction_dimensions)
+
+    positive_loss = (
+        positive_terms.sum(dim=reduction_dimensions)
+        / positive_counts.clamp_min(1)
+    )
+
+    negative_loss = (
+        negative_terms * distance_weights
+    ).sum(dim=reduction_dimensions) / positive_counts.clamp_min(1)
+
+    represented_tokens = positive_counts > 0
+    represented_tokens[int(AudioToken.CTC_BLANK)] = False
+
+    return (
+        positive_loss + negative_loss
+    )[represented_tokens].mean()
 
 def save_checkpoint(
     path: Path,

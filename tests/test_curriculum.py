@@ -101,6 +101,7 @@ def test_initial_stage_creates_a_new_model_with_the_same_loss() -> None:
 
     assert "--resume" not in command
     assert "--init-from" not in command
+    assert command[command.index("--train-samples") + 1] == "5000"
     assert "--tone-activity-loss-weight" not in command
     assert TONE_ACTIVITY_LOSS_WEIGHT == 0.3
 

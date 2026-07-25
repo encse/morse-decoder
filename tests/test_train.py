@@ -155,6 +155,8 @@ def test_ctc_objective_trains_and_evaluates_token_sequences() -> None:
 
     assert loss > 0.0
     assert torch.isfinite(torch.tensor(metrics.loss))
+    assert metrics.tone_activity_loss >= 0.0
+    assert metrics.event_timing_loss >= 0.0
 
 
 def test_resume_rejects_a_legacy_frame_objective(tmp_path: Path) -> None:

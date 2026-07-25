@@ -27,6 +27,7 @@ from morse_timing.audio_model import (
     MorseAudioCTCModel,
 )
 from morse_timing.audio_train import (
+    EVENT_TIMING_LOSS_WEIGHT,
     OverfitMetrics,
     TONE_ACTIVITY_LOSS_WEIGHT,
     evaluate_overfit_dataset,
@@ -270,6 +271,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-characters", type=int)
     parser.add_argument("--space-probability", type=float)
     parser.add_argument("--word-boundary-sample-probability", type=float)
+    parser.add_argument("--doubled-space-probability", type=float)
+    parser.add_argument("--noise-only-probability", type=float)
     parser.add_argument("--hidden-size", type=int)
     parser.add_argument("--projection-size", type=int)
     parser.add_argument("--gru-layers", type=int)
@@ -389,6 +392,8 @@ def main(argv: list[str] | None = None) -> None:
                 "word_boundary_sample_probability": (
                     args.word_boundary_sample_probability
                 ),
+                "doubled_space_probability": args.doubled_space_probability,
+                "noise_only_probability": args.noise_only_probability,
             }.items()
             if value is not None
         },
@@ -523,6 +528,7 @@ def main(argv: list[str] | None = None) -> None:
         "regenerate_every": args.regenerate_every,
         "perfect_epochs": args.perfect_epochs,
         "target_epochs": args.target_epochs,
+        "event_timing_loss_weight": EVENT_TIMING_LOSS_WEIGHT,
         "tone_activity_loss_weight": TONE_ACTIVITY_LOSS_WEIGHT,
         "curriculum_target_reached": False,
     }
@@ -588,8 +594,15 @@ def main(argv: list[str] | None = None) -> None:
         learning_rate = optimizer.param_groups[0]["lr"]
         print(
             f"epoch={epoch:03d} train_loss={training_loss:.5f} "
+            f"train_ctc_loss={training_loss.ctc_loss:.5f} "
+            f"train_tone_activity_loss={training_loss.tone_activity_loss:.5f} "
+            f"train_event_timing_loss={training_loss.event_timing_loss:.5f} "
             f"validation_loss={validation.loss:.5f} "
             f"validation_ctc_loss={validation.ctc_loss:.5f} "
+            f"validation_tone_activity_loss="
+            f"{validation.tone_activity_loss:.5f} "
+            f"validation_event_timing_loss="
+            f"{validation.event_timing_loss:.5f} "
             f"token_error_rate={validation.token_error_rate:.4f} "
             f"character_error_rate={validation.character_error_rate:.4f} "
             f"exact_tokens={validation.exact_token_accuracy:.4f} "
