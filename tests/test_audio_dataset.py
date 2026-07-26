@@ -3,6 +3,7 @@ import torch
 from morse_timing.audio_dataset import (
     CleanAudioMorseDataset,
     Stage1DatasetConfig,
+    build_audio_sequence_sample,
     collate_audio_sequences,
 )
 from morse_timing.audio_tokens import (
@@ -30,6 +31,7 @@ def test_text_tokens_round_trip_through_deterministic_parser() -> None:
         AudioToken.DIT,
         AudioToken.DIT,
         AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
     )
     assert audio_tokens_to_morse(tokens) == ".- / -..."
     assert decode_audio_tokens(tokens).text == "A B"
@@ -63,6 +65,7 @@ def test_word_gap_follows_the_causal_character_boundary() -> None:
         AudioToken.END_WORD,
         AudioToken.DAH,
         AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
     )
     assert decode_audio_tokens(tokens).text == "E T"
 
@@ -131,7 +134,11 @@ def test_clean_audio_dataset_produces_model_ready_features() -> None:
 
     assert first.spectrogram.ndim == 2
     assert first.spectrogram.shape[1] == 65
-    assert first.targets.tolist() == [AudioToken.DIT, AudioToken.END_CHARACTER]
+    assert first.targets.tolist() == [
+        AudioToken.DIT,
+        AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
+    ]
     assert first.tone_activity.shape == (first.input_length,)
     assert torch.all((first.spectrogram >= 0.0) & (first.spectrogram <= 1.0))
     assert first.input_length > first.target_length
@@ -172,7 +179,7 @@ def test_audio_batch_padding_lengths_and_concatenated_targets() -> None:
         samples[0].input_length,
         samples[1].input_length,
     ]
-    assert batch.target_lengths.tolist() == [2, 12]
+    assert batch.target_lengths.tolist() == [3, 13]
     assert torch.equal(batch.targets, torch.cat([samples[0].targets, samples[1].targets]))
     assert batch.tone_activity.shape == batch.spectrograms.shape[:2]
     assert torch.all(batch.padding_mask[0, samples[0].input_length :])
@@ -192,6 +199,93 @@ def test_tone_activity_marks_frames_that_overlap_the_tone() -> None:
 
     assert sample.tone_activity[:3].tolist() == [1.0, 1.0, 1.0]
     assert sample.tone_activity[3:].sum() == 0.0
+
+
+def test_doubled_word_gap_changes_only_audio_duration_not_the_ctc_target() -> None:
+    config = Stage1DatasetConfig(
+        wpm=20.0,
+        leading_silence_seconds=0.0,
+        trailing_silence_seconds=0.0,
+    )
+    normal = build_audio_sequence_sample(
+        "E E",
+        config,
+        doubled_word_gaps=(False,),
+    )
+    doubled = build_audio_sequence_sample(
+        "E E",
+        config,
+        doubled_word_gaps=(True,),
+    )
+
+    assert doubled.input_length - normal.input_length == 21
+    assert torch.equal(doubled.targets, normal.targets)
+    assert doubled.text == normal.text == "E E"
+
+
+def test_generated_word_gaps_reproducibly_include_both_durations() -> None:
+    dataset = CleanAudioMorseDataset(1, seed=123)
+    sampled = {
+        doubled
+        for index in range(100)
+        for doubled in dataset._sample_doubled_word_gaps(index, "E E E")
+    }
+
+    assert sampled == {False, True}
+    assert dataset._sample_doubled_word_gaps(
+        7, "E E"
+    ) == dataset._sample_doubled_word_gaps(7, "E E")
+
+
+def test_noise_only_samples_default_value() -> None:
+
+    dataset = CleanAudioMorseDataset(1, seed=41)
+
+    sample_count = 10_000
+    noise_only_count = sum(
+        dataset._is_noise_only(index)
+        for index in range(sample_count)
+    )
+
+    ratio = noise_only_count / sample_count
+
+    assert dataset.config.noise_only_probability == 0.05
+    assert 0.04 <= ratio <= 0.06
+
+
+def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:
+    config = Stage1DatasetConfig(
+        noise_only_probability=1.0,
+        min_noise_only_seconds=2.0,
+        max_noise_only_seconds=2.0,
+        noise_power=0.0,
+    )
+    dataset = CleanAudioMorseDataset(1, config, seed=41)
+
+    sample = dataset[0]
+
+    assert sample.text == ""
+    assert sample.targets.numel() == 0
+    assert sample.input_length == 100
+    assert torch.all(sample.tone_activity == 0.0)
+    assert torch.any(sample.spectrogram > 0.0)
+    assert torch.equal(sample.spectrogram, dataset[0].spectrogram)
+
+
+def test_explicit_text_samples_are_not_replaced_with_noise_only_samples() -> None:
+    sample = CleanAudioMorseDataset(
+        1,
+        Stage1DatasetConfig(noise_only_probability=1.0),
+        seed=41,
+        texts=["E"],
+    )[0]
+
+    assert sample.text == "E"
+    assert sample.targets.tolist() == [
+        AudioToken.DIT,
+        AudioToken.END_CHARACTER,
+        AudioToken.END_WORD,
+    ]
 
 
 def test_dataset_is_reproducible_by_seed_and_index() -> None:

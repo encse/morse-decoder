@@ -40,7 +40,9 @@ text
 
 Training samples independently vary speed, carrier frequency, timing jitter,
 noise power, amplitude, fading, and keying edge duration. The effective ranges
-are saved in every checkpoint.
+are saved in every checkpoint. Every generated word boundary is randomly
+rendered as either the standard seven-unit gap or a doubled fourteen-unit gap,
+without adding another output character. 
 
 ## Setup and tests
 
@@ -71,7 +73,9 @@ dimension is selected reproducibly.
 
 Every stage, including the first one, uses the same model architecture and the
 same `CTC + tone activity` training loss. There is no separate base-model
-training phase.
+training phase. Every word, including the final word in a sample, ends with an
+`END_WORD` target. The batch decoder treats the final `END_WORD` as a
+terminator instead of rendering a trailing space.
 
 The optional top-level `reference_wav` path is decoded after every successfully
 completed stage. Its predicted Morse sequence and decoded text are printed for

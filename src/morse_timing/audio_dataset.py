@@ -49,8 +49,13 @@ class Stage1DatasetConfig:
     max_characters: int = 12
     space_probability: float = 0.12
     word_boundary_sample_probability: float = 0.5
+    doubled_space_probability: float = 0.5
     leading_silence_seconds: float = 0.7
     trailing_silence_seconds: float = 0.7
+    noise_only_probability: float = 0.05
+    min_noise_only_seconds: float = 2.0
+    max_noise_only_seconds: float = 4.0
+    min_noise_only_power: float = 1.0
     audio: AudioConfig = AudioConfig()
     spectrogram: SpectrogramConfig = SpectrogramConfig()
 
@@ -81,6 +86,8 @@ class Stage1DatasetConfig:
             raise ValueError(
                 "Word-boundary sample probability must be between zero and one"
             )
+        if not 0.0 <= self.doubled_space_probability <= 1.0:
+            raise ValueError("Doubled-space probability must be between zero and one")
         if self.timing_jitter < 0.0:
             raise ValueError("Timing jitter cannot be negative")
         if self.noise_power < 0.0:
@@ -103,6 +110,15 @@ class Stage1DatasetConfig:
             raise ValueError("Rise/fall range must be non-negative and ordered")
         if self.leading_silence_seconds < 0.0 or self.trailing_silence_seconds < 0.0:
             raise ValueError("Leading and trailing silence cannot be negative")
+        if not 0.0 <= self.noise_only_probability <= 1.0:
+            raise ValueError("Noise-only probability must be between zero and one")
+        if (
+            self.min_noise_only_seconds <= 0.0
+            or self.max_noise_only_seconds < self.min_noise_only_seconds
+        ):
+            raise ValueError("Noise-only duration range must be positive and ordered")
+        if self.min_noise_only_power <= 0.0:
+            raise ValueError("Minimum noise-only power must be positive")
 
 
 @dataclass(frozen=True)
@@ -176,6 +192,19 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             index += self.size
         if index < 0 or index >= self.size:
             raise IndexError(index)
+        if self.texts is None and self._is_noise_only(index):
+            return build_noise_only_sequence_sample(
+                self.config,
+                duration_seconds=self._sample_noise_only_duration(index),
+                noise_seed=int(
+                    np.random.SeedSequence([self.seed, index, 4]).generate_state(1)[0]
+                ),
+                noise_power=max(
+                    self.config.min_noise_only_power,
+                    self._sample_noise_power(index),
+                ),
+                amplitude_percent=self._sample_amplitude_percent(index),
+            )
         text = self.texts[index] if self.texts is not None else self._random_text(index)
         return build_audio_sequence_sample(
             text,
@@ -195,6 +224,45 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             fade_frequency_hz=self._sample_fade_frequency(index),
             fade_phase_radians=self._sample_fade_phase(index),
             rise_fall_ms=self._sample_rise_fall(index),
+            doubled_word_gaps=(
+                None
+                if self.texts is not None
+                else self._sample_doubled_word_gaps(index, text)
+            ),
+        )
+
+    def _is_noise_only(self, index: int) -> bool:
+        """Select reproducible negative examples without affecting text sampling."""
+
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 13]).generate_state(1)[0])
+        )
+        return bool(rng.random() < self.config.noise_only_probability)
+
+    def _sample_noise_only_duration(self, index: int) -> float:
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 14]).generate_state(1)[0])
+        )
+        return float(
+            rng.uniform(
+                self.config.min_noise_only_seconds,
+                self.config.max_noise_only_seconds,
+            )
+        )
+
+    def _sample_doubled_word_gaps(
+        self,
+        index: int,
+        text: str,
+    ) -> tuple[bool, ...]:
+        """Choose normal or doubled duration for every generated word boundary."""
+
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 12]).generate_state(1)[0])
+        )
+        return tuple(
+            bool(rng.random() < self.config.doubled_space_probability)
+            for _ in range(text.count(" "))
         )
 
     def _sample_rise_fall(self, index: int) -> float:
@@ -378,6 +446,7 @@ def build_audio_sequence_sample(
     fade_frequency_hz: float | None = None,
     fade_phase_radians: float = 0.0,
     rise_fall_ms: float | None = None,
+    doubled_word_gaps: Sequence[bool] | None = None,
 ) -> AudioSequenceSample:
     """Create one model-ready clean audio sample from caller-supplied text."""
 
@@ -401,6 +470,7 @@ def build_audio_sequence_sample(
         audio_config,
         timing_jitter=selected_config.timing_jitter,
         rng=np.random.default_rng(timing_seed),
+        doubled_word_gaps=doubled_word_gaps,
     )
     leading_samples = round(
         selected_config.leading_silence_seconds * audio_config.sample_rate
@@ -476,6 +546,42 @@ def build_audio_sequence_sample(
         targets=targets,
         tone_activity=tone_activity,
         text=normalized_text,
+    )
+
+
+def build_noise_only_sequence_sample(
+    config: Stage1DatasetConfig,
+    *,
+    duration_seconds: float,
+    noise_seed: int,
+    noise_power: float,
+    amplitude_percent: float,
+) -> AudioSequenceSample:
+    """Create one negative example containing noise without a Morse signal."""
+
+    sample_count = round(duration_seconds * config.audio.sample_rate)
+    waveform = np.zeros(sample_count, dtype=np.float32)
+    waveform = add_power_scaled_noise(
+        waveform,
+        config.audio.sample_rate,
+        noise_power,
+        np.random.default_rng(noise_seed),
+    )
+    waveform = apply_recording_amplitude(waveform, amplitude_percent)
+    spectrogram = compute_log_magnitude_stft(
+        torch.from_numpy(waveform),
+        config.audio.sample_rate,
+        config.spectrogram,
+    )
+    features = prepare_spectrogram_features(
+        spectrogram.values,
+        config.spectrogram,
+    ).transpose(0, 1).contiguous()
+    return AudioSequenceSample(
+        spectrogram=features,
+        targets=torch.empty(0, dtype=torch.long),
+        tone_activity=torch.zeros(features.shape[0], dtype=torch.float32),
+        text="",
     )
 
 

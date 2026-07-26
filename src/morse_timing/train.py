@@ -270,6 +270,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-characters", type=int)
     parser.add_argument("--space-probability", type=float)
     parser.add_argument("--word-boundary-sample-probability", type=float)
+    parser.add_argument("--doubled-space-probability", type=float)
+    parser.add_argument("--noise-only-probability", type=float)
     parser.add_argument("--hidden-size", type=int)
     parser.add_argument("--projection-size", type=int)
     parser.add_argument("--gru-layers", type=int)
@@ -389,6 +391,8 @@ def main(argv: list[str] | None = None) -> None:
                 "word_boundary_sample_probability": (
                     args.word_boundary_sample_probability
                 ),
+                "doubled_space_probability": args.doubled_space_probability,
+                "noise_only_probability": args.noise_only_probability,
             }.items()
             if value is not None
         },
