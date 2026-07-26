@@ -1,4 +1,4 @@
-"""Generate the checked-in clean and random HELLO WORLD analysis examples."""
+"""Generate clean, low-pass, and band-pass HELLO WORLD analysis examples."""
 
 from __future__ import annotations
 
@@ -22,13 +22,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--seed",
         type=int,
         default=42,
-        help="Fixed seed for the random supported-range example",
+        help="Seed for the shared noisy condition in the filtered examples",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Generate both reports through the public audio inference CLI."""
+    """Generate all three reports through the public audio inference CLI."""
 
     args = build_argument_parser().parse_args(argv)
     project_directory = Path(__file__).resolve().parent
@@ -42,7 +42,12 @@ def main(argv: list[str] | None = None) -> None:
 
     output_directory = project_directory / "analysis"
     output_directory.mkdir(parents=True, exist_ok=True)
-    for profile in ("clean", "random"):
+    examples = (
+        ("clean", "clean", ()),
+        ("lowpass-1500hz", "random", ("--lowpass-cutoff-hz", "1500")),
+        ("bandpass-500hz", "random", ("--bandpass-bandwidth-hz", "500")),
+    )
+    for name, profile, filter_options in examples:
         command = [
             sys.executable,
             "-m",
@@ -52,17 +57,16 @@ def main(argv: list[str] | None = None) -> None:
             "--profile",
             profile,
             "--repetitions",
-            "4",
-            "--noise-gap-seconds",
+            "1",
+            "--gap-seconds",
             "15",
-            "--lowpass-cutoff-hz",
-            "2000",
+            *filter_options,
             "--output",
-            str(output_directory / f"hello-world-{profile}.png"),
+            str(output_directory / f"hello-world-{name}.png"),
         ]
         if profile == "random":
             command.extend(("--seed", str(args.seed)))
-        print(f"Generating {profile} analysis...", flush=True)
+        print(f"Generating {name} analysis...", flush=True)
         subprocess.run(command, cwd=project_directory, check=True)
 
 

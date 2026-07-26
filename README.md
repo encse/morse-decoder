@@ -13,13 +13,21 @@ offline and live inference plus stateful ONNX export.
 
 ![Clean HELLO WORLD inference analysis](analysis/hello-world-clean.png)
 
-### Random supported-range signal
+### 1500 Hz low-pass signal
 
-[Listen to the random WAV](analysis/hello-world-random.wav)
+[Listen to the low-pass WAV](analysis/hello-world-lowpass-1500hz.wav)
 
-![Random HELLO WORLD inference analysis](analysis/hello-world-random.png)
+![1500 Hz low-pass HELLO WORLD inference analysis](analysis/hello-world-lowpass-1500hz.png)
 
-Regenerate both examples with `models/final.pt` and random seed `42`:
+### 500 Hz band-pass signal
+
+[Listen to the band-pass WAV](analysis/hello-world-bandpass-500hz.wav)
+
+![500 Hz band-pass HELLO WORLD inference analysis](analysis/hello-world-bandpass-500hz.png)
+
+Regenerate all three examples with `models/final.pt`. The two filtered
+examples use the same random supported-range condition and background noise,
+so only their explicit receiver filter differs:
 
 ```bash
 python generate_analysis.py
@@ -42,7 +50,27 @@ Training samples independently vary speed, carrier frequency, timing jitter,
 noise power, amplitude, fading, and keying edge duration. The effective ranges
 are saved in every checkpoint. Every generated word boundary is randomly
 rendered as either the standard seven-unit gap or a doubled fourteen-unit gap,
-without adding another output character. 
+without adding another output character.
+
+### Input filters
+
+Every generated input, including both Morse-bearing and noise-only samples,
+gets one reproducibly sampled receiver-style filter after the signal, noise,
+fading, and recording gain have been combined:
+
+- 50% low-pass: logarithmically sampled cutoff from 300 to 3500 Hz;
+- 50% band-pass: logarithmically sampled bandwidth from 150 to 1200 Hz,
+  centered on the sampled Morse tone (and clipped below Nyquist);
+- both use a randomly selected second- or fourth-order smooth
+  Butterworth-style magnitude response and preserve the input RMS.
+
+There are exactly two automatic exceptions. The first curriculum stage, which
+creates a model from scratch, stays unfiltered even when that stage is resumed.
+All later stages enable the filters. Synthesized analysis with `--profile
+clean` is also unfiltered, while `--profile random` applies the same
+receiver-filter sampling. The separate `--lowpass-cutoff-hz` and
+`--bandpass-bandwidth-hz` analysis options can add an explicitly requested
+filter after profile processing.
 
 ## Setup and tests
 
@@ -66,7 +94,8 @@ python -m pip install -e ".[kaggle-upload]" # dataset upload
 
 The complete training configuration is in `curriculum-plan.json`. The first
 stage creates the model from scratch using one exact starting value for every
-dimension. Later stages widen one randomly selected dimension by one step
+dimension and does not apply receiver filtering. Later stages enable receiver
+filtering and widen one randomly selected dimension by one step
 until decoded-text accuracy reaches the configured threshold for the required
 number of epochs. A failed dimension is set aside and another unfinished
 dimension is selected reproducibly.

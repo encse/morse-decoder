@@ -17,12 +17,14 @@ from morse_timing.audio import (
     RenderedSegment,
     add_power_scaled_noise,
     add_white_noise,
+    apply_radio_noise_filter,
     apply_recording_amplitude,
     apply_sinusoidal_fading,
     save_wav,
     synthesize_morse_with_timing,
 )
 from morse_timing.audio_dataset import (
+    CleanAudioMorseDataset,
     Stage1DatasetConfig,
     prepare_spectrogram_features,
     restore_stage1_dataset_config,
@@ -158,8 +160,9 @@ class MorseAudioDecoder:
         profile: str = "clean",
         random_seed: int | None = None,
         repetition_count: int = 1,
-        noise_gap_seconds: float = 0.0,
+        gap_seconds: float = 0.0,
         lowpass_cutoff_hz: float | None = None,
+        bandpass_bandwidth_hz: float | None = None,
     ) -> AudioDecodeResult:
         """Synthesize caller text and greedily decode CTC token output."""
 
@@ -180,8 +183,10 @@ class MorseAudioDecoder:
             text,
             config,
             repetition_count,
-            noise_gap_seconds,
+            gap_seconds,
             lowpass_cutoff_hz,
+            random_seed,
+            bandpass_bandwidth_hz,
         )
         frame_tokens, predicted, normalized_prediction, morse, decoded_text, valid, error = (
             self._decode_features(sample.features, chunk_frames)
@@ -397,6 +402,7 @@ class MorseAudioDecoder:
             )
         config = replace(
             config,
+            apply_input_filter=profile == "random",
             audio=replace(config.audio, rise_fall_ms=config.min_rise_fall_ms),
         )
         return config
@@ -477,8 +483,9 @@ class MorseAudioDecoder:
         random_seed: int | None = None,
         output_path: Path | None = None,
         repetition_count: int = 1,
-        noise_gap_seconds: float = 0.0,
+        gap_seconds: float = 0.0,
         lowpass_cutoff_hz: float | None = None,
+        bandpass_bandwidth_hz: float | None = None,
     ) -> tuple[Path, Path]:
         """Save the exact synthesized audio and its visual inference report."""
 
@@ -499,8 +506,10 @@ class MorseAudioDecoder:
             text,
             config,
             repetition_count,
-            noise_gap_seconds,
+            gap_seconds,
             lowpass_cutoff_hz,
+            random_seed,
+            bandpass_bandwidth_hz,
         )
         (
             frame_tokens,
@@ -576,13 +585,24 @@ class MorseAudioDecoder:
                 ("Sample rate", f"{config.audio.sample_rate:g} Hz"),
                 ("Chunk", f"{chunk_frames} frames"),
                 ("Repetitions", str(repetition_count)),
-                ("Noise gap", f"{noise_gap_seconds:g} s"),
+                ("Gap", f"{gap_seconds:g} s"),
                 (
                     "Low-pass",
                     (
                         "off"
                         if lowpass_cutoff_hz is None
                         else f"0–{lowpass_cutoff_hz:g} Hz"
+                    ),
+                ),
+                (
+                    "Band-pass",
+                    (
+                        "off"
+                        if bandpass_bandwidth_hz is None
+                        else (
+                            f"{bandpass_bandwidth_hz:g} Hz wide around "
+                            f"{config.audio.frequency_hz:g} Hz"
+                        )
                     ),
                 ),
             ),
@@ -594,24 +614,27 @@ class MorseAudioDecoder:
         text: str,
         config: Stage1DatasetConfig,
         repetition_count: int = 1,
-        noise_gap_seconds: float = 0.0,
+        gap_seconds: float = 0.0,
         lowpass_cutoff_hz: float | None = None,
+        input_filter_seed: int | None = None,
+        bandpass_bandwidth_hz: float | None = None,
     ) -> SynthesizedInferenceInput:
         """Create the one deterministic signal used for decoding and reporting."""
 
         if repetition_count < 1:
             raise ValueError("Repetition count must be positive")
-        if not numpy.isfinite(noise_gap_seconds) or noise_gap_seconds < 0.0:
-            raise ValueError("Noise gap duration must be finite and non-negative")
+        if not numpy.isfinite(gap_seconds) or gap_seconds < 0.0:
+            raise ValueError("Gap duration must be finite and non-negative")
+        if lowpass_cutoff_hz is not None and bandpass_bandwidth_hz is not None:
+            raise ValueError("Low-pass and band-pass filters cannot be combined")
 
         source_text = normalize_text(text)
         normalized = " ".join([source_text] * repetition_count)
         timing_rng = numpy.random.default_rng(0)
         waveform_chunks: list[numpy.ndarray] = []
         shifted_segments: list[RenderedSegment] = []
-        gap_ranges: list[tuple[int, int]] = []
         sample_offset = 0
-        gap_samples = round(noise_gap_seconds * config.audio.sample_rate)
+        gap_samples = round(gap_seconds * config.audio.sample_rate)
         for repetition_index in range(repetition_count):
             repetition_waveform, repetition_segments = synthesize_morse_with_timing(
                 source_text,
@@ -631,7 +654,6 @@ class MorseAudioDecoder:
             )
             sample_offset += repetition_waveform.size
             if repetition_index < repetition_count - 1 and gap_samples:
-                gap_ranges.append((sample_offset, sample_offset + gap_samples))
                 waveform_chunks.append(
                     numpy.zeros(gap_samples, dtype=numpy.float32)
                 )
@@ -666,17 +688,6 @@ class MorseAudioDecoder:
             config.noise_power,
             numpy.random.default_rng(0),
         )
-        gap_noise_power = max(config.min_noise_only_power, config.noise_power)
-        gap_rng = numpy.random.default_rng(2)
-        for gap_start, gap_end in gap_ranges:
-            waveform[leading_samples + gap_start : leading_samples + gap_end] = (
-                add_power_scaled_noise(
-                    numpy.zeros(gap_end - gap_start, dtype=numpy.float32),
-                    config.audio.sample_rate,
-                    gap_noise_power,
-                    gap_rng,
-                )
-            )
         waveform = apply_recording_amplitude(
             waveform,
             config.max_amplitude_percent,
@@ -686,17 +697,54 @@ class MorseAudioDecoder:
             config.noise_percent,
             numpy.random.default_rng(1),
         )
-        if lowpass_cutoff_hz is not None:
-            frequencies = numpy.fft.rfftfreq(
-                waveform.size,
-                d=1.0 / config.audio.sample_rate,
+        explicit_filter = (
+            lowpass_cutoff_hz is not None or bandpass_bandwidth_hz is not None
+        )
+        input_filter = (
+            None
+            if explicit_filter
+            else CleanAudioMorseDataset(
+                1,
+                config,
+                seed=0 if input_filter_seed is None else input_filter_seed,
+            )._sample_input_filter(0)
+        )
+        if input_filter is not None:
+            waveform = apply_radio_noise_filter(
+                waveform,
+                config.audio.sample_rate,
+                low_cutoff_hz=input_filter.low_cutoff_hz,
+                high_cutoff_hz=input_filter.high_cutoff_hz,
+                order=input_filter.order,
             )
-            spectrum = numpy.fft.rfft(waveform)
-            spectrum[frequencies > lowpass_cutoff_hz] = 0.0
-            waveform = numpy.fft.irfft(
-                spectrum,
-                n=waveform.size,
-            ).astype(numpy.float32)
+        if lowpass_cutoff_hz is not None:
+            waveform = apply_radio_noise_filter(
+                waveform,
+                config.audio.sample_rate,
+                high_cutoff_hz=lowpass_cutoff_hz,
+                order=4,
+            )
+        if bandpass_bandwidth_hz is not None:
+            if (
+                not numpy.isfinite(bandpass_bandwidth_hz)
+                or bandpass_bandwidth_hz <= 0.0
+            ):
+                raise ValueError("Band-pass bandwidth must be finite and positive")
+            half_bandwidth_hz = bandpass_bandwidth_hz / 2.0
+            nyquist_hz = config.audio.sample_rate / 2.0
+            waveform = apply_radio_noise_filter(
+                waveform,
+                config.audio.sample_rate,
+                low_cutoff_hz=max(
+                    20.0,
+                    config.audio.frequency_hz - half_bandwidth_hz,
+                ),
+                high_cutoff_hz=min(
+                    nyquist_hz * 0.975,
+                    config.audio.frequency_hz + half_bandwidth_hz,
+                ),
+                order=4,
+            )
         spectrogram = compute_log_magnitude_stft(
             torch.from_numpy(waveform),
             config.audio.sample_rate,
@@ -851,15 +899,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Number of times to synthesize the input text",
     )
     parser.add_argument(
-        "--noise-gap-seconds",
+        "--gap-seconds",
         type=float,
         default=0.0,
-        help="Duration of noise inserted between repeated texts",
+        help="Duration inserted between repeated texts, using the input's noise profile",
     )
-    parser.add_argument(
+    filter_group = parser.add_mutually_exclusive_group()
+    filter_group.add_argument(
         "--lowpass-cutoff-hz",
         type=float,
         help="Remove synthesized-input frequencies above this cutoff",
+    )
+    filter_group.add_argument(
+        "--bandpass-bandwidth-hz",
+        type=float,
+        help="Filter around the synthesized tone with this total bandwidth",
     )
     parser.add_argument("--list-training-texts", action="store_true")
     return parser
@@ -925,8 +979,9 @@ def main(argv: list[str] | None = None) -> None:
             profile=args.profile,
             random_seed=random_seed,
             repetition_count=args.repetitions,
-            noise_gap_seconds=args.noise_gap_seconds,
+            gap_seconds=args.gap_seconds,
             lowpass_cutoff_hz=args.lowpass_cutoff_hz,
+            bandpass_bandwidth_hz=args.bandpass_bandwidth_hz,
         )
 
         wav_path, image_path = decoder.save_input_artifacts(
@@ -946,8 +1001,9 @@ def main(argv: list[str] | None = None) -> None:
             random_seed=random_seed,
             output_path=args.output,
             repetition_count=args.repetitions,
-            noise_gap_seconds=args.noise_gap_seconds,
+            gap_seconds=args.gap_seconds,
             lowpass_cutoff_hz=args.lowpass_cutoff_hz,
+            bandpass_bandwidth_hz=args.bandpass_bandwidth_hz,
         )
 
         profile_suffix = (

@@ -272,6 +272,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--word-boundary-sample-probability", type=float)
     parser.add_argument("--doubled-space-probability", type=float)
     parser.add_argument("--noise-only-probability", type=float)
+    parser.add_argument(
+        "--input-filter",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Apply a sampled receiver filter to every generated input",
+    )
     parser.add_argument("--hidden-size", type=int)
     parser.add_argument("--projection-size", type=int)
     parser.add_argument("--gru-layers", type=int)
@@ -393,6 +399,7 @@ def main(argv: list[str] | None = None) -> None:
                 ),
                 "doubled_space_probability": args.doubled_space_probability,
                 "noise_only_probability": args.noise_only_probability,
+                "apply_input_filter": args.input_filter,
             }.items()
             if value is not None
         },

@@ -253,41 +253,59 @@ def test_noise_only_samples_default_value() -> None:
     assert 0.19 <= ratio <= 0.21
 
 
-def test_noise_only_filters_use_expected_reproducible_proportions() -> None:
+def test_input_filters_use_expected_reproducible_proportions() -> None:
     dataset = CleanAudioMorseDataset(1, seed=41)
 
     sample_count = 10_000
     filters = [
-        dataset._sample_noise_only_filter(index)
+        dataset._sample_input_filter(index)
         for index in range(sample_count)
     ]
-    kinds = [noise_filter.kind for noise_filter in filters]
+    kinds = [input_filter.kind for input_filter in filters if input_filter is not None]
 
-    assert 0.48 <= kinds.count("none") / sample_count <= 0.52
-    assert 0.23 <= kinds.count("lowpass") / sample_count <= 0.27
-    assert 0.23 <= kinds.count("bandpass") / sample_count <= 0.27
+    assert 0.48 <= kinds.count("lowpass") / sample_count <= 0.52
+    assert 0.48 <= kinds.count("bandpass") / sample_count <= 0.52
     assert filters == [
-        dataset._sample_noise_only_filter(index)
+        dataset._sample_input_filter(index)
         for index in range(sample_count)
     ]
     assert all(
-        noise_filter.order in {2, 4}
-        for noise_filter in filters
-        if noise_filter.kind != "none"
+        input_filter is not None and input_filter.order in {2, 4}
+        for input_filter in filters
     )
     assert all(
-        noise_filter.low_cutoff_hz is None
-        and noise_filter.high_cutoff_hz is not None
-        for noise_filter in filters
-        if noise_filter.kind == "lowpass"
+        input_filter is not None
+        and input_filter.low_cutoff_hz is None
+        and input_filter.high_cutoff_hz is not None
+        for input_filter in filters
+        if input_filter is not None and input_filter.kind == "lowpass"
     )
     assert all(
-        noise_filter.low_cutoff_hz is not None
-        and noise_filter.high_cutoff_hz is not None
-        and noise_filter.low_cutoff_hz < noise_filter.high_cutoff_hz
-        for noise_filter in filters
-        if noise_filter.kind == "bandpass"
+        input_filter is not None
+        and input_filter.low_cutoff_hz is not None
+        and input_filter.high_cutoff_hz is not None
+        and input_filter.low_cutoff_hz < input_filter.high_cutoff_hz
+        for input_filter in filters
+        if input_filter is not None and input_filter.kind == "bandpass"
     )
+
+
+def test_input_filter_is_applied_to_morse_samples_and_can_be_disabled() -> None:
+    filtered = CleanAudioMorseDataset(
+        1,
+        Stage1DatasetConfig(apply_input_filter=True),
+        seed=41,
+        texts=["SOS"],
+    )[0]
+    unfiltered = CleanAudioMorseDataset(
+        1,
+        Stage1DatasetConfig(apply_input_filter=False),
+        seed=41,
+        texts=["SOS"],
+    )[0]
+
+    assert torch.equal(filtered.targets, unfiltered.targets)
+    assert not torch.equal(filtered.spectrogram, unfiltered.spectrogram)
 
 
 def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:

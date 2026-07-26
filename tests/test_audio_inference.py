@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from morse_timing.audio import (
@@ -95,13 +96,13 @@ def test_character_spans_follow_exact_rendered_tone_boundaries() -> None:
     assert spans[1].end_seconds == 0.76
 
 
-def test_synthesized_analysis_repeats_text_with_noise_between_copies() -> None:
+def test_synthesized_analysis_repeats_text_with_the_same_noise_in_gaps() -> None:
     config = Stage1DatasetConfig(
         wpm=20.0,
         leading_silence_seconds=0.0,
         trailing_silence_seconds=0.0,
-        noise_power=0.0,
-        min_noise_only_power=1.0,
+        noise_power=4.0,
+        min_noise_only_power=1_000.0,
     )
     decoder = MorseAudioDecoder(
         MorseAudioCTCModel(
@@ -120,7 +121,7 @@ def test_synthesized_analysis_repeats_text_with_noise_between_copies() -> None:
         "E",
         config,
         repetition_count=4,
-        noise_gap_seconds=5.0,
+        gap_seconds=5.0,
     )
     message_samples = 1_920
     gap_samples = 5 * config.audio.sample_rate
@@ -132,6 +133,92 @@ def test_synthesized_analysis_repeats_text_with_noise_between_copies() -> None:
         gap_start = (gap_index + 1) * message_samples + gap_index * gap_samples
         gap = sample.waveform[gap_start : gap_start + gap_samples]
         assert np.std(gap) > 0.0
+    message_silence = sample.waveform[600:1_800]
+    first_gap = sample.waveform[message_samples : message_samples + gap_samples]
+    assert np.std(first_gap) == pytest.approx(np.std(message_silence), rel=0.1)
+
+
+def test_clean_analysis_gap_is_silent() -> None:
+    config = Stage1DatasetConfig(
+        leading_silence_seconds=0.0,
+        trailing_silence_seconds=0.0,
+        noise_power=0.0,
+        apply_input_filter=False,
+    )
+    decoder = MorseAudioDecoder(
+        MorseAudioCTCModel(
+            AudioModelConfig(
+                projection_size=8,
+                hidden_size=8,
+                dense_layers=2,
+            )
+        ),
+        config,
+        (),
+        torch.device("cpu"),
+    )
+
+    sample = decoder._build_synthesized_input(
+        "E",
+        config,
+        repetition_count=2,
+        gap_seconds=1.0,
+    )
+
+    assert np.all(sample.waveform[1_920 : 1_920 + config.audio.sample_rate] == 0.0)
+
+
+def test_explicit_analysis_filters_apply_to_clean_profile() -> None:
+    config = Stage1DatasetConfig(
+        leading_silence_seconds=0.0,
+        trailing_silence_seconds=0.0,
+        apply_input_filter=False,
+    )
+    decoder = MorseAudioDecoder(
+        MorseAudioCTCModel(
+            AudioModelConfig(
+                projection_size=8,
+                hidden_size=8,
+                dense_layers=2,
+            )
+        ),
+        config,
+        (),
+        torch.device("cpu"),
+    )
+
+    clean = decoder._build_synthesized_input("E", config)
+    lowpass = decoder._build_synthesized_input(
+        "E",
+        config,
+        lowpass_cutoff_hz=1_500.0,
+    )
+    bandpass = decoder._build_synthesized_input(
+        "E",
+        config,
+        bandpass_bandwidth_hz=500.0,
+    )
+    automatic_filter_config = Stage1DatasetConfig(
+        leading_silence_seconds=0.0,
+        trailing_silence_seconds=0.0,
+        apply_input_filter=True,
+    )
+    explicit_overrides_automatic = decoder._build_synthesized_input(
+        "E",
+        automatic_filter_config,
+        bandpass_bandwidth_hz=500.0,
+    )
+
+    assert not np.array_equal(clean.waveform, lowpass.waveform)
+    assert not np.array_equal(clean.waveform, bandpass.waveform)
+    assert np.array_equal(bandpass.waveform, explicit_overrides_automatic.waveform)
+    with pytest.raises(ValueError, match="cannot be combined"):
+        decoder._build_synthesized_input(
+            "E",
+            config,
+            lowpass_cutoff_hz=1_500.0,
+            bandpass_bandwidth_hz=500.0,
+        )
 
 
 def test_ctc_token_events_ignore_blanks_and_repeated_frames() -> None:
@@ -248,6 +335,7 @@ def test_unspecified_augmentations_default_to_clean_inference() -> None:
     assert effective.timing_jitter == 0.0
     assert effective.noise_percent == 0.0
     assert effective.fade_depth_percent == 0.0
+    assert not effective.apply_input_filter
 
 
 def test_random_profile_samples_reproducibly_from_checkpoint_ranges() -> None:
@@ -287,6 +375,7 @@ def test_random_profile_samples_reproducibly_from_checkpoint_ranges() -> None:
     assert 100.0 <= first.audio.frequency_hz <= 2_000.0
     assert 0.0 <= first.timing_jitter <= 0.1
     assert 0.0 <= first.noise_power <= 200.0
+    assert first.apply_input_filter
     assert 10.0 <= first.max_amplitude_percent <= 150.0
     assert 0.0 <= first.fade_depth_percent <= 60.0
     assert 0.1 <= first.min_fade_frequency_hz <= 2.0

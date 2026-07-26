@@ -145,6 +145,7 @@ def _training_command(
     target_exact_text: float | None = None,
     target_epochs: int = 2,
     resume: bool = False,
+    apply_input_filter: bool | None = None,
 ) -> list[str]:
     """Build one isolated training command for a curriculum range."""
 
@@ -176,6 +177,14 @@ def _training_command(
             raise ValueError("Cannot resume without a checkpoint")
     else:
         command.extend(("--resume" if resume else "--init-from", str(checkpoint)))
+    selected_input_filter = (
+        checkpoint is not None
+        if apply_input_filter is None
+        else apply_input_filter
+    )
+    command.append(
+        "--input-filter" if selected_input_filter else "--no-input-filter"
+    )
     command.extend(("--output", str(output)))
     command.extend(_range_options(ranges))
     if "learning_rate" in training:
@@ -506,6 +515,7 @@ def _run_adaptive_plan(
                 threshold,
                 target_epochs,
                 resume=resume_training,
+                apply_input_filter=completed_stages > 0,
             ),
             check=True,
         )
