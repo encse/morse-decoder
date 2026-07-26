@@ -576,6 +576,7 @@ class MorseAudioDecoder:
             timing_jitter=config.timing_jitter,
             rng=numpy.random.default_rng(0),
         )
+
         leading_samples = round(
             config.leading_silence_seconds * config.audio.sample_rate
         )
@@ -590,6 +591,7 @@ class MorseAudioDecoder:
                     numpy.zeros(trailing_samples, dtype=numpy.float32),
                 )
             )
+
         waveform = apply_sinusoidal_fading(
             waveform,
             config.audio.sample_rate,
@@ -762,93 +764,121 @@ def build_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+
 def main(argv: list[str] | None = None) -> None:
-    """Load a checkpoint and print a clean synthesized inference result."""
+    """Load a checkpoint and print an inference result."""
 
     args = build_argument_parser().parse_args(argv)
     decoder = MorseAudioDecoder.load(args.checkpoint, args.device)
+
+    wav_path = None
+    image_path = None
+    random_seed = args.seed
+
     if args.wav is not None:
         if args.text is not None:
             raise ValueError("Text and --wav cannot be used together")
+
         result = decoder.decode_wav(args.wav, args.chunk_frames)
-        print(f"input_wav={result.input_path}")
-        print(
-            f"source_sample_rate={result.source_sample_rate} "
-            f"model_sample_rate={result.model_sample_rate} "
-            f"duration={result.duration_seconds:.3f}s "
-            f"stream_chunk_frames={args.chunk_frames}"
-        )
-        print(f"predicted_tokens={' '.join(result.predicted_tokens)}")
-        if result.normalized_tokens != result.predicted_tokens:
-            print(f"normalized_tokens={' '.join(result.normalized_tokens)}")
-        print(f"predicted_morse={result.predicted_morse}")
-        print(f"decoded_text={result.decoded_text!r}")
-        print(f"valid={result.valid}")
-        if result.error:
-            print(f"error={result.error}")
-        return
-    if args.list_training_texts:
-        for index, text in enumerate(decoder.training_texts):
-            print(f"{index}: {text}")
+
+        input_lines = [
+            f"input_wav={result.input_path}",
+            (
+                f"source_sample_rate={result.source_sample_rate} "
+                f"model_sample_rate={result.model_sample_rate} "
+                f"duration={result.duration_seconds:.3f}s"
+            ),
+        ]
+        validity_line = f"valid={result.valid}"
+
+    else:
+        if args.list_training_texts:
+            for index, text in enumerate(decoder.training_texts):
+                print(f"{index}: {text}")
+
+            if args.text is None:
+                return
+
         if args.text is None:
-            return
-    if args.text is None:
-        raise ValueError("Text is required unless --list-training-texts is used")
-    random_seed = args.seed
-    if args.profile == "random" and random_seed is None:
-        random_seed = int(numpy.random.SeedSequence().generate_state(1)[0])
-    result = decoder.decode_text(
-        args.text,
-        args.wpm,
-        args.frequency,
-        args.timing_jitter,
-        args.noise_percent,
-        args.fade_depth_percent,
-        args.fade_frequency,
-        args.rise_fall_ms,
-        args.chunk_frames,
-        noise_power=args.noise_power,
-        amplitude_percent=args.amplitude_percent,
-        profile=args.profile,
-        random_seed=random_seed,
-    )
-    wav_path, image_path = decoder.save_input_artifacts(
-        args.text,
-        args.wpm,
-        args.frequency,
-        args.artifacts_directory,
-        args.timing_jitter,
-        args.noise_percent,
-        args.fade_depth_percent,
-        args.fade_frequency,
-        args.rise_fall_ms,
-        noise_power=args.noise_power,
-        amplitude_percent=args.amplitude_percent,
-        chunk_frames=args.chunk_frames,
-        profile=args.profile,
-        random_seed=random_seed,
-        output_path=args.output,
-    )
-    print(f"input_text={result.input_text!r}")
-    print(
-        f"profile={args.profile}"
-        + (f" seed={random_seed}" if random_seed is not None else "")
-    )
+            raise ValueError(
+                "Text is required unless --list-training-texts is used"
+            )
+
+        if args.profile == "random" and random_seed is None:
+            random_seed = int(
+                numpy.random.SeedSequence().generate_state(1)[0]
+            )
+
+        result = decoder.decode_text(
+            args.text,
+            args.wpm,
+            args.frequency,
+            args.timing_jitter,
+            args.noise_percent,
+            args.fade_depth_percent,
+            args.fade_frequency,
+            args.rise_fall_ms,
+            args.chunk_frames,
+            noise_power=args.noise_power,
+            amplitude_percent=args.amplitude_percent,
+            profile=args.profile,
+            random_seed=random_seed,
+        )
+
+        wav_path, image_path = decoder.save_input_artifacts(
+            args.text,
+            args.wpm,
+            args.frequency,
+            args.artifacts_directory,
+            args.timing_jitter,
+            args.noise_percent,
+            args.fade_depth_percent,
+            args.fade_frequency,
+            args.rise_fall_ms,
+            noise_power=args.noise_power,
+            amplitude_percent=args.amplitude_percent,
+            chunk_frames=args.chunk_frames,
+            profile=args.profile,
+            random_seed=random_seed,
+            output_path=args.output,
+        )
+
+        profile_suffix = (
+            f" seed={random_seed}" if random_seed is not None else ""
+        )
+
+        input_lines = [
+            f"input_text={result.input_text!r}",
+            f"profile={args.profile}{profile_suffix}",
+            f"expected_tokens={' '.join(result.expected_tokens)}",
+        ]
+        validity_line = (
+            f"valid={result.valid} "
+            f"exact_tokens={result.exact_tokens} "
+            f"exact_text={result.exact_text}"
+        )
+
+    for line in input_lines:
+        print(line)
+
     print(f"stream_chunk_frames={args.chunk_frames}")
-    print(f"expected_tokens={' '.join(result.expected_tokens)}")
-    print(f"predicted_tokens={' '.join(result.predicted_tokens)}")
-    if result.normalized_tokens != result.predicted_tokens:
-        print(f"normalized_tokens={' '.join(result.normalized_tokens)}")
-    print(f"predicted_morse={result.predicted_morse}")
+    # print(f"predicted_tokens={' '.join(result.predicted_tokens)}")
+
+    # if result.normalized_tokens != result.predicted_tokens:
+    #     print(f"normalized_tokens={' '.join(result.normalized_tokens)}")
+
+    # print(f"predicted_morse={result.predicted_morse}")
     print(f"decoded_text={result.decoded_text!r}")
-    print(
-        f"valid={result.valid} exact_tokens={result.exact_tokens} "
-        f"exact_text={result.exact_text}"
-    )
+    print(validity_line)
+
     if result.error:
         print(f"error={result.error}")
-    print(f"wav= {wav_path}")
-    print(f"analysis= {image_path}")
+
+    if wav_path is not None:
+        print(f"wav={wav_path}")
+
+    if image_path is not None:
+        print(f"analysis={image_path}")
 
 
 if __name__ == "__main__":
