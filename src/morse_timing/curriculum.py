@@ -157,9 +157,9 @@ def _training_command(
         "--early-stopping",
         str(training.get("early_stopping", 0)),
         "--train-samples",
-        str(training.get("train_samples", 5_000)),
+        str(training.get("train_samples", 6_000)),
         "--validation-samples",
-        str(training.get("validation_samples", 500)),
+        str(training.get("validation_samples", 600)),
         "--batch-size",
         str(training.get("batch_size", 32)),
         "--num-workers",
@@ -183,6 +183,13 @@ def _training_command(
     if "minimum_learning_rate" in training:
         command.extend(
             ("--minimum-learning-rate", str(training["minimum_learning_rate"]))
+        )
+    if "noise_only_probability" in training:
+        command.extend(
+            (
+                "--noise-only-probability",
+                str(training["noise_only_probability"]),
+            )
         )
     if target_exact_text is not None:
         command.extend(

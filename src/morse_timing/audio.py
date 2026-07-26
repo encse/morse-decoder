@@ -215,6 +215,65 @@ def add_power_scaled_noise(
     return samples + noise.astype(np.float32)
 
 
+def apply_radio_noise_filter(
+    samples: NDArray[np.float32],
+    sample_rate: int,
+    *,
+    low_cutoff_hz: float | None = None,
+    high_cutoff_hz: float | None = None,
+    order: int = 4,
+) -> NDArray[np.float32]:
+    """Apply smooth Butterworth-style radio filtering and preserve noise RMS."""
+
+    if sample_rate <= 0:
+        raise ValueError("Sample rate must be positive")
+    if order <= 0:
+        raise ValueError("Filter order must be positive")
+    nyquist_hz = sample_rate / 2.0
+    if low_cutoff_hz is not None and (
+        not np.isfinite(low_cutoff_hz)
+        or low_cutoff_hz <= 0.0
+        or low_cutoff_hz >= nyquist_hz
+    ):
+        raise ValueError("Low cutoff must be finite and between zero and Nyquist")
+    if high_cutoff_hz is not None and (
+        not np.isfinite(high_cutoff_hz)
+        or high_cutoff_hz <= 0.0
+        or high_cutoff_hz >= nyquist_hz
+    ):
+        raise ValueError("High cutoff must be finite and between zero and Nyquist")
+    if (
+        low_cutoff_hz is not None
+        and high_cutoff_hz is not None
+        and high_cutoff_hz <= low_cutoff_hz
+    ):
+        raise ValueError("High cutoff must be above low cutoff")
+    if low_cutoff_hz is None and high_cutoff_hz is None:
+        return samples.copy()
+    if samples.size == 0:
+        return samples.copy()
+
+    frequencies = np.fft.rfftfreq(samples.size, d=1.0 / sample_rate)
+    response = np.ones_like(frequencies)
+    if low_cutoff_hz is not None:
+        response[0] = 0.0
+        response[1:] /= np.sqrt(
+            1.0 + (low_cutoff_hz / frequencies[1:]) ** (2 * order)
+        )
+    if high_cutoff_hz is not None:
+        response /= np.sqrt(
+            1.0 + (frequencies / high_cutoff_hz) ** (2 * order)
+        )
+
+    source_rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+    spectrum = np.fft.rfft(samples)
+    filtered = np.fft.irfft(spectrum * response, n=samples.size)
+    filtered_rms = float(np.sqrt(np.mean(filtered**2)))
+    if source_rms > 0.0 and filtered_rms > 0.0:
+        filtered *= source_rms / filtered_rms
+    return filtered.astype(np.float32)
+
+
 def apply_recording_amplitude(
     samples: NDArray[np.float32], amplitude_percent: float
 ) -> NDArray[np.float32]:

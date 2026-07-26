@@ -75,7 +75,11 @@ def test_adaptive_curriculum_starts_at_exact_configured_values() -> None:
 
 def test_adaptive_stage_restarts_learning_rate_and_sets_accuracy_target() -> None:
     command = _training_command(
-        {"learning_rate": 0.0001, "minimum_learning_rate": 0.00001},
+        {
+            "learning_rate": 0.0001,
+            "minimum_learning_rate": 0.00001,
+            "noise_only_probability": 0.2,
+        },
         Path("source.pt"),
         Path("output.pt"),
         {"wpm": (18, 22)},
@@ -87,6 +91,7 @@ def test_adaptive_stage_restarts_learning_rate_and_sets_accuracy_target() -> Non
     assert command[command.index("--learning-rate") + 1] == "0.0001"
     assert command[command.index("--target-exact-text") + 1] == "0.9"
     assert command[command.index("--target-epochs") + 1] == "2"
+    assert command[command.index("--noise-only-probability") + 1] == "0.2"
 
 
 def test_initial_stage_creates_a_new_model_with_the_same_loss() -> None:

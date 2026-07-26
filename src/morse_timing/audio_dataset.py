@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -17,6 +17,7 @@ from morse_timing.audio import (
     RenderedSegment,
     add_power_scaled_noise,
     add_white_noise,
+    apply_radio_noise_filter,
     apply_recording_amplitude,
     apply_sinusoidal_fading,
     synthesize_morse_with_timing,
@@ -52,7 +53,7 @@ class Stage1DatasetConfig:
     doubled_space_probability: float = 0.5
     leading_silence_seconds: float = 0.7
     trailing_silence_seconds: float = 0.7
-    noise_only_probability: float = 0.05
+    noise_only_probability: float = 0.20
     min_noise_only_seconds: float = 2.0
     max_noise_only_seconds: float = 4.0
     min_noise_only_power: float = 1.0
@@ -140,6 +141,16 @@ class AudioSequenceSample:
 
 
 @dataclass(frozen=True)
+class NoiseOnlyFilter:
+    """One reproducibly sampled receiver-like filter for a noise-only example."""
+
+    kind: Literal["none", "lowpass", "bandpass"]
+    low_cutoff_hz: float | None = None
+    high_cutoff_hz: float | None = None
+    order: int = 4
+
+
+@dataclass(frozen=True)
 class AudioBatch:
     """A padded spectrogram batch with concatenated CTC targets."""
 
@@ -204,6 +215,7 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
                     self._sample_noise_power(index),
                 ),
                 amplitude_percent=self._sample_amplitude_percent(index),
+                noise_filter=self._sample_noise_only_filter(index),
             )
         text = self.texts[index] if self.texts is not None else self._random_text(index)
         return build_audio_sequence_sample(
@@ -248,6 +260,59 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
                 self.config.min_noise_only_seconds,
                 self.config.max_noise_only_seconds,
             )
+        )
+
+    def _sample_noise_only_filter(self, index: int) -> NoiseOnlyFilter:
+        """Choose an unfiltered, low-pass, or receiver-band-limited noise shape."""
+
+        rng = np.random.default_rng(
+            int(np.random.SeedSequence([self.seed, index, 15]).generate_state(1)[0])
+        )
+        selection = rng.random()
+        if selection < 0.5:
+            return NoiseOnlyFilter("none")
+
+        nyquist_hz = self.config.audio.sample_rate / 2.0
+        order = int(rng.choice((2, 4)))
+        if selection < 0.75:
+            maximum_cutoff = min(3_500.0, nyquist_hz * 0.95)
+            minimum_cutoff = min(300.0, maximum_cutoff)
+            cutoff = float(
+                np.exp(rng.uniform(np.log(minimum_cutoff), np.log(maximum_cutoff)))
+            )
+            return NoiseOnlyFilter(
+                "lowpass",
+                high_cutoff_hz=cutoff,
+                order=order,
+            )
+
+        maximum_bandwidth = min(1_200.0, nyquist_hz * 0.8)
+        minimum_bandwidth = min(150.0, maximum_bandwidth)
+        bandwidth_hz = float(
+            np.exp(
+                rng.uniform(
+                    np.log(minimum_bandwidth),
+                    np.log(maximum_bandwidth),
+                )
+            )
+        )
+        center_hz = float(
+            np.clip(
+                self._sample_frequency(index),
+                20.0 + bandwidth_hz / 2.0,
+                nyquist_hz * 0.975 - bandwidth_hz / 2.0,
+            )
+        )
+        low_cutoff_hz = max(20.0, center_hz - bandwidth_hz / 2.0)
+        high_cutoff_hz = min(
+            nyquist_hz * 0.975,
+            center_hz + bandwidth_hz / 2.0,
+        )
+        return NoiseOnlyFilter(
+            "bandpass",
+            low_cutoff_hz=low_cutoff_hz,
+            high_cutoff_hz=high_cutoff_hz,
+            order=order,
         )
 
     def _sample_doubled_word_gaps(
@@ -556,6 +621,7 @@ def build_noise_only_sequence_sample(
     noise_seed: int,
     noise_power: float,
     amplitude_percent: float,
+    noise_filter: NoiseOnlyFilter | None = None,
 ) -> AudioSequenceSample:
     """Create one negative example containing noise without a Morse signal."""
 
@@ -567,6 +633,15 @@ def build_noise_only_sequence_sample(
         noise_power,
         np.random.default_rng(noise_seed),
     )
+    selected_filter = noise_filter or NoiseOnlyFilter("none")
+    if selected_filter.kind != "none":
+        waveform = apply_radio_noise_filter(
+            waveform,
+            config.audio.sample_rate,
+            low_cutoff_hz=selected_filter.low_cutoff_hz,
+            high_cutoff_hz=selected_filter.high_cutoff_hz,
+            order=selected_filter.order,
+        )
     waveform = apply_recording_amplitude(waveform, amplitude_percent)
     spectrogram = compute_log_magnitude_stft(
         torch.from_numpy(waveform),

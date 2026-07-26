@@ -51,6 +51,12 @@ def main(argv: list[str] | None = None) -> None:
             "HELLO WORLD",
             "--profile",
             profile,
+            "--repetitions",
+            "4",
+            "--noise-gap-seconds",
+            "15",
+            "--lowpass-cutoff-hz",
+            "2000",
             "--output",
             str(output_directory / f"hello-world-{profile}.png"),
         ]

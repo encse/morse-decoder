@@ -7,6 +7,7 @@ import pytest
 from morse_timing.audio import (
     AudioConfig,
     add_power_scaled_noise,
+    apply_radio_noise_filter,
     apply_recording_amplitude,
     apply_sinusoidal_fading,
     add_white_noise,
@@ -21,6 +22,33 @@ def test_noise_uses_sample_rate_normalized_power() -> None:
     noisy = add_power_scaled_noise(samples, 8_000, 1.0, np.random.default_rng(7))
 
     assert float(noisy.std()) == pytest.approx(np.sqrt(0.004), rel=0.02)
+
+
+def test_radio_noise_filter_shapes_spectrum_and_preserves_rms() -> None:
+    samples = np.random.default_rng(7).normal(
+        0.0,
+        0.2,
+        200_000,
+    ).astype(np.float32)
+
+    filtered = apply_radio_noise_filter(
+        samples,
+        8_000,
+        low_cutoff_hz=500.0,
+        high_cutoff_hz=1_000.0,
+        order=4,
+    )
+    frequencies = np.fft.rfftfreq(filtered.size, d=1.0 / 8_000)
+    power = np.abs(np.fft.rfft(filtered)) ** 2
+    passband_power = power[
+        (frequencies >= 600.0) & (frequencies <= 900.0)
+    ].mean()
+    rejected_power = power[
+        (frequencies >= 2_000.0) & (frequencies <= 3_000.0)
+    ].mean()
+
+    assert float(filtered.std()) == pytest.approx(float(samples.std()), rel=0.001)
+    assert rejected_power < passband_power * 0.005
 
 
 def test_recording_amplitude_scales_signal_and_clips() -> None:

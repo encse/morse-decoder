@@ -26,8 +26,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=Path("/kaggle/working/models"),
         help="Writable checkpoint directory",
     )
-    parser.add_argument("--train-samples", type=int, default=5_000)
-    parser.add_argument("--validation-samples", type=int, default=500)
+    parser.add_argument("--train-samples", type=int, default=12_000)
+    parser.add_argument("--validation-samples", type=int, default=1_200)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=2)
     return parser

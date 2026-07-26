@@ -237,8 +237,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--train-samples", type=int, default=5_000)
-    parser.add_argument("--validation-samples", type=int, default=500)
+    parser.add_argument("--train-samples", type=int, default=6_000)
+    parser.add_argument("--validation-samples", type=int, default=600)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--minimum-learning-rate", type=float, default=1e-5)

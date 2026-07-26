@@ -249,8 +249,45 @@ def test_noise_only_samples_default_value() -> None:
 
     ratio = noise_only_count / sample_count
 
-    assert dataset.config.noise_only_probability == 0.05
-    assert 0.04 <= ratio <= 0.06
+    assert dataset.config.noise_only_probability == 0.20
+    assert 0.19 <= ratio <= 0.21
+
+
+def test_noise_only_filters_use_expected_reproducible_proportions() -> None:
+    dataset = CleanAudioMorseDataset(1, seed=41)
+
+    sample_count = 10_000
+    filters = [
+        dataset._sample_noise_only_filter(index)
+        for index in range(sample_count)
+    ]
+    kinds = [noise_filter.kind for noise_filter in filters]
+
+    assert 0.48 <= kinds.count("none") / sample_count <= 0.52
+    assert 0.23 <= kinds.count("lowpass") / sample_count <= 0.27
+    assert 0.23 <= kinds.count("bandpass") / sample_count <= 0.27
+    assert filters == [
+        dataset._sample_noise_only_filter(index)
+        for index in range(sample_count)
+    ]
+    assert all(
+        noise_filter.order in {2, 4}
+        for noise_filter in filters
+        if noise_filter.kind != "none"
+    )
+    assert all(
+        noise_filter.low_cutoff_hz is None
+        and noise_filter.high_cutoff_hz is not None
+        for noise_filter in filters
+        if noise_filter.kind == "lowpass"
+    )
+    assert all(
+        noise_filter.low_cutoff_hz is not None
+        and noise_filter.high_cutoff_hz is not None
+        and noise_filter.low_cutoff_hz < noise_filter.high_cutoff_hz
+        for noise_filter in filters
+        if noise_filter.kind == "bandpass"
+    )
 
 
 def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:

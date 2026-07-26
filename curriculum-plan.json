@@ -11,8 +11,9 @@
   "training": {
     "epochs": 1000000,
     "early_stopping": 0,
-    "train_samples": 10000,
-    "validation_samples": 1000,
+    "train_samples": 12000,
+    "validation_samples": 1200,
+    "noise_only_probability": 0.2,
     "batch_size": 32,
     "device": "auto",
     "learning_rate": 0.0008,

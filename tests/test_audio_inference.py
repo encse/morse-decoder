@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from morse_timing.audio import (
@@ -92,6 +93,45 @@ def test_character_spans_follow_exact_rendered_tone_boundaries() -> None:
     assert spans[0].end_seconds == 0.16
     assert spans[1].start_seconds == 0.58
     assert spans[1].end_seconds == 0.76
+
+
+def test_synthesized_analysis_repeats_text_with_noise_between_copies() -> None:
+    config = Stage1DatasetConfig(
+        wpm=20.0,
+        leading_silence_seconds=0.0,
+        trailing_silence_seconds=0.0,
+        noise_power=0.0,
+        min_noise_only_power=1.0,
+    )
+    decoder = MorseAudioDecoder(
+        MorseAudioCTCModel(
+            AudioModelConfig(
+                projection_size=8,
+                hidden_size=8,
+                dense_layers=2,
+            )
+        ),
+        config,
+        (),
+        torch.device("cpu"),
+    )
+
+    sample = decoder._build_synthesized_input(
+        "E",
+        config,
+        repetition_count=4,
+        noise_gap_seconds=5.0,
+    )
+    message_samples = 1_920
+    gap_samples = 5 * config.audio.sample_rate
+
+    assert sample.text == "E E E E"
+    assert sample.waveform.size == 4 * message_samples + 3 * gap_samples
+    assert len(sample.character_spans) == 4
+    for gap_index in range(3):
+        gap_start = (gap_index + 1) * message_samples + gap_index * gap_samples
+        gap = sample.waveform[gap_start : gap_start + gap_samples]
+        assert np.std(gap) > 0.0
 
 
 def test_ctc_token_events_ignore_blanks_and_repeated_frames() -> None:
