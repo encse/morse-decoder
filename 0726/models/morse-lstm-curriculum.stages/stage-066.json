@@ -1,0 +1,122 @@
+{
+  "best_character_error_rate": 0.08327024981074943,
+  "best_token_error_rate": 0.005686679080066428,
+  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.stages/stage-066.pt",
+  "curriculum_ranges": {
+    "amplitude": [
+      30.0,
+      150.0
+    ],
+    "fade_depth": [
+      0.0,
+      60.0
+    ],
+    "fade_frequency": [
+      0.1,
+      2.0
+    ],
+    "frequency": [
+      100.0,
+      2000.0
+    ],
+    "jitter": [
+      0.0,
+      0.08
+    ],
+    "noise_power": [
+      0.0,
+      45.0
+    ],
+    "rise_fall": [
+      0.0,
+      10.0
+    ],
+    "wpm": [
+      10.0,
+      40.0
+    ]
+  },
+  "curriculum_stage": 66,
+  "dataset_config": {
+    "audio": {
+      "amplitude": 0.5,
+      "frequency_hz": 700.0,
+      "rise_fall_ms": 0.0,
+      "sample_rate": 8000
+    },
+    "doubled_space_probability": 0.5,
+    "fade_depth_percent": 60.0,
+    "leading_silence_seconds": 0.7,
+    "max_amplitude_percent": 150.0,
+    "max_characters": 12,
+    "max_fade_frequency_hz": 2.0,
+    "max_frequency_hz": 2000.0,
+    "max_noise_only_seconds": 4.0,
+    "max_rise_fall_ms": 10.0,
+    "max_wpm": 40.0,
+    "min_amplitude_percent": 30.0,
+    "min_characters": 2,
+    "min_fade_frequency_hz": 0.1,
+    "min_frequency_hz": 100.0,
+    "min_noise_only_power": 1.0,
+    "min_noise_only_seconds": 2.0,
+    "min_rise_fall_ms": 0.0,
+    "min_wpm": 10.0,
+    "noise_only_probability": 0.05,
+    "noise_percent": 0.0,
+    "noise_power": 45.0,
+    "space_probability": 0.12,
+    "spectrogram": {
+      "frequency_bins": 65,
+      "hop_length": 160,
+      "minimum_db": -80.0,
+      "n_fft": 160,
+      "scale": "power",
+      "win_length": 160
+    },
+    "timing_jitter": 0.08,
+    "trailing_silence_seconds": 0.7,
+    "word_boundary_sample_probability": 0.5,
+    "wpm": 20.0
+  },
+  "epoch": 28,
+  "experiment": {
+    "curriculum_target_reached": true,
+    "perfect_epochs": 5,
+    "regenerate_every": 5,
+    "seed": 42,
+    "target_epochs": 2,
+    "target_exact_text": 0.9,
+    "tone_activity_loss_weight": 0.3,
+    "train_samples": 5000,
+    "validation_samples": 500
+  },
+  "format_version": 1,
+  "metrics": {
+    "character_error_rate": 0.08655059298511229,
+    "ctc_loss": 0.02621209423057735,
+    "exact_text_accuracy": 0.9,
+    "exact_token_accuracy": 0.9,
+    "example_prediction": "4,NQ4CD '2",
+    "example_reference": "4,NQ4CN '2",
+    "loss": 0.059909874171018604,
+    "token_error_rate": 0.005837652860953148
+  },
+  "model_config": {
+    "auxiliary_heads": true,
+    "bidirectional": true,
+    "dense_layers": 4,
+    "first_conv_channels": 8,
+    "frequency_bins": 65,
+    "hidden_size": 256,
+    "num_gru_layers": 2,
+    "num_lstm_layers": 1,
+    "projection_size": 256,
+    "second_conv_channels": 16,
+    "sequence_model": "lstm",
+    "tcn_layers": 4
+  },
+  "purpose": "curriculum",
+  "texts": [],
+  "training_objective": "ctc"
+}
