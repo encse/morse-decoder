@@ -25,6 +25,7 @@ from morse_timing.audio import (
 )
 from morse_timing.audio_dataset import (
     CleanAudioMorseDataset,
+    InputFilter,
     Stage1DatasetConfig,
     prepare_spectrogram_features,
     restore_stage1_dataset_config,
@@ -97,6 +98,24 @@ class SynthesizedInferenceInput:
     expected_tokens: tuple[AudioToken, ...]
     character_spans: tuple[CharacterSpan, ...]
     config: Stage1DatasetConfig
+    input_filter: InputFilter | None
+
+
+def _input_filter_label(input_filter: InputFilter | None) -> str:
+    """Format the exact receiver filter applied to a synthesized input."""
+
+    if input_filter is None:
+        return "off"
+    if input_filter.kind == "lowpass":
+        return (
+            f"low-pass 0–{input_filter.high_cutoff_hz:g} Hz "
+            f"(order {input_filter.order})"
+        )
+    return (
+        f"band-pass {input_filter.low_cutoff_hz:g}–"
+        f"{input_filter.high_cutoff_hz:g} Hz "
+        f"(order {input_filter.order})"
+    )
 
 
 class MorseAudioDecoder:
@@ -586,25 +605,7 @@ class MorseAudioDecoder:
                 ("Chunk", f"{chunk_frames} frames"),
                 ("Repetitions", str(repetition_count)),
                 ("Gap", f"{gap_seconds:g} s"),
-                (
-                    "Low-pass",
-                    (
-                        "off"
-                        if lowpass_cutoff_hz is None
-                        else f"0–{lowpass_cutoff_hz:g} Hz"
-                    ),
-                ),
-                (
-                    "Band-pass",
-                    (
-                        "off"
-                        if bandpass_bandwidth_hz is None
-                        else (
-                            f"{bandpass_bandwidth_hz:g} Hz wide around "
-                            f"{config.audio.frequency_hz:g} Hz"
-                        )
-                    ),
-                ),
+                ("Filter", _input_filter_label(sample.input_filter)),
             ),
         )
         return wav_path, image_path
@@ -627,6 +628,17 @@ class MorseAudioDecoder:
             raise ValueError("Gap duration must be finite and non-negative")
         if lowpass_cutoff_hz is not None and bandpass_bandwidth_hz is not None:
             raise ValueError("Low-pass and band-pass filters cannot be combined")
+        if (
+            lowpass_cutoff_hz is not None
+            and lowpass_cutoff_hz < config.audio.frequency_hz + 100.0
+        ):
+            raise ValueError(
+                "Low-pass cutoff must be at least 100 Hz above the Morse tone"
+            )
+        if bandpass_bandwidth_hz is not None and not (
+            100.0 <= bandpass_bandwidth_hz <= 1_000.0
+        ):
+            raise ValueError("Band-pass bandwidth must be between 100 and 1000 Hz")
 
         source_text = normalize_text(text)
         normalized = " ".join([source_text] * repetition_count)
@@ -697,18 +709,34 @@ class MorseAudioDecoder:
             config.noise_percent,
             numpy.random.default_rng(1),
         )
-        explicit_filter = (
-            lowpass_cutoff_hz is not None or bandpass_bandwidth_hz is not None
-        )
-        input_filter = (
-            None
-            if explicit_filter
-            else CleanAudioMorseDataset(
+        if lowpass_cutoff_hz is not None:
+            input_filter = InputFilter(
+                "lowpass",
+                high_cutoff_hz=lowpass_cutoff_hz,
+                order=4,
+            )
+        elif bandpass_bandwidth_hz is not None:
+            half_bandwidth_hz = bandpass_bandwidth_hz / 2.0
+            nyquist_hz = config.audio.sample_rate / 2.0
+            center_hz = float(
+                numpy.clip(
+                    config.audio.frequency_hz,
+                    20.0 + half_bandwidth_hz,
+                    nyquist_hz * 0.975 - half_bandwidth_hz,
+                )
+            )
+            input_filter = InputFilter(
+                "bandpass",
+                low_cutoff_hz=center_hz - half_bandwidth_hz,
+                high_cutoff_hz=center_hz + half_bandwidth_hz,
+                order=4,
+            )
+        else:
+            input_filter = CleanAudioMorseDataset(
                 1,
                 config,
                 seed=0 if input_filter_seed is None else input_filter_seed,
             )._sample_input_filter(0)
-        )
         if input_filter is not None:
             waveform = apply_radio_noise_filter(
                 waveform,
@@ -716,34 +744,6 @@ class MorseAudioDecoder:
                 low_cutoff_hz=input_filter.low_cutoff_hz,
                 high_cutoff_hz=input_filter.high_cutoff_hz,
                 order=input_filter.order,
-            )
-        if lowpass_cutoff_hz is not None:
-            waveform = apply_radio_noise_filter(
-                waveform,
-                config.audio.sample_rate,
-                high_cutoff_hz=lowpass_cutoff_hz,
-                order=4,
-            )
-        if bandpass_bandwidth_hz is not None:
-            if (
-                not numpy.isfinite(bandpass_bandwidth_hz)
-                or bandpass_bandwidth_hz <= 0.0
-            ):
-                raise ValueError("Band-pass bandwidth must be finite and positive")
-            half_bandwidth_hz = bandpass_bandwidth_hz / 2.0
-            nyquist_hz = config.audio.sample_rate / 2.0
-            waveform = apply_radio_noise_filter(
-                waveform,
-                config.audio.sample_rate,
-                low_cutoff_hz=max(
-                    20.0,
-                    config.audio.frequency_hz - half_bandwidth_hz,
-                ),
-                high_cutoff_hz=min(
-                    nyquist_hz * 0.975,
-                    config.audio.frequency_hz + half_bandwidth_hz,
-                ),
-                order=4,
             )
         spectrogram = compute_log_magnitude_stft(
             torch.from_numpy(waveform),
@@ -767,6 +767,7 @@ class MorseAudioDecoder:
                 config.audio.sample_rate,
             ),
             config=config,
+            input_filter=input_filter,
         )
 
     def _architecture_label(self) -> str:
@@ -913,7 +914,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     filter_group.add_argument(
         "--bandpass-bandwidth-hz",
         type=float,
-        help="Filter around the synthesized tone with this total bandwidth",
+        help="Apply a 100–1000 Hz-wide filter around the synthesized tone",
     )
     parser.add_argument("--list-training-texts", action="store_true")
     return parser
@@ -937,14 +938,14 @@ def main(argv: list[str] | None = None) -> None:
         result = decoder.decode_wav(args.wav, args.chunk_frames)
 
         input_lines = [
-            f"input_wav={result.input_path}",
+            f"input_wav= {result.input_path}",
             (
                 f"source_sample_rate={result.source_sample_rate} "
                 f"model_sample_rate={result.model_sample_rate} "
                 f"duration={result.duration_seconds:.3f}s"
             ),
         ]
-        validity_line = f"valid={result.valid}"
+        validity_line = f"valid= {result.valid}"
 
     else:
         if args.list_training_texts:
@@ -1016,9 +1017,9 @@ def main(argv: list[str] | None = None) -> None:
             f"expected_tokens={' '.join(result.expected_tokens)}",
         ]
         validity_line = (
-            f"valid={result.valid} "
-            f"exact_tokens={result.exact_tokens} "
-            f"exact_text={result.exact_text}"
+            f"valid= {result.valid} "
+            f"exact_tokens= {result.exact_tokens} "
+            f"exact_text= {result.exact_text}"
         )
 
     for line in input_lines:
@@ -1031,17 +1032,17 @@ def main(argv: list[str] | None = None) -> None:
     #     print(f"normalized_tokens={' '.join(result.normalized_tokens)}")
 
     # print(f"predicted_morse={result.predicted_morse}")
-    print(f"decoded_text={result.decoded_text!r}")
+    print(f"decoded_text= {result.decoded_text!r}")
     print(validity_line)
 
     if result.error:
-        print(f"error={result.error}")
+        print(f"error= {result.error}")
 
     if wav_path is not None:
-        print(f"wav={wav_path}")
+        print(f"wav= {wav_path}")
 
     if image_path is not None:
-        print(f"analysis={image_path}")
+        print(f"analysis= {image_path}")
 
 
 if __name__ == "__main__":

@@ -19,11 +19,11 @@ offline and live inference plus stateful ONNX export.
 
 ![1500 Hz low-pass HELLO WORLD inference analysis](analysis/hello-world-lowpass-1500hz.png)
 
-### 500 Hz band-pass signal
+### 750 Hz-wide band-pass signal
 
-[Listen to the band-pass WAV](analysis/hello-world-bandpass-500hz.wav)
+[Listen to the band-pass WAV](analysis/hello-world-bandpass-750hz.wav)
 
-![500 Hz band-pass HELLO WORLD inference analysis](analysis/hello-world-bandpass-500hz.png)
+![750 Hz-wide band-pass HELLO WORLD inference analysis](analysis/hello-world-bandpass-750hz.png)
 
 Regenerate all three examples with `models/final.pt`. The two filtered
 examples use the same random supported-range condition and background noise,
@@ -58,9 +58,10 @@ Every generated input, including both Morse-bearing and noise-only samples,
 gets one reproducibly sampled receiver-style filter after the signal, noise,
 fading, and recording gain have been combined:
 
-- 50% low-pass: logarithmically sampled cutoff from 300 to 3500 Hz;
-- 50% band-pass: logarithmically sampled bandwidth from 150 to 1200 Hz,
-  centered on the sampled Morse tone (and clipped below Nyquist);
+- 50% low-pass: logarithmically sampled cutoff from at least 100 Hz above
+  the Morse tone up to 3500 Hz;
+- 50% band-pass: logarithmically sampled 100–1000 Hz bandwidth centered on
+  the Morse tone (clipped only near the spectrum boundaries);
 - both use a randomly selected second- or fourth-order smooth
   Butterworth-style magnitude response and preserve the input RMS.
 
@@ -70,7 +71,9 @@ All later stages enable the filters. Synthesized analysis with `--profile
 clean` is also unfiltered, while `--profile random` applies the same
 receiver-filter sampling. The separate `--lowpass-cutoff-hz` and
 `--bandpass-bandwidth-hz` analysis options can add an explicitly requested
-filter after profile processing.
+filter after profile processing. Explicit low-pass cutoffs must also be at
+least 100 Hz above the selected Morse tone, and explicit band-pass bandwidths
+must be between 100 and 1000 Hz.
 
 ## Setup and tests
 

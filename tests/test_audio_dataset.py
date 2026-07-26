@@ -277,15 +277,21 @@ def test_input_filters_use_expected_reproducible_proportions() -> None:
         input_filter is not None
         and input_filter.low_cutoff_hz is None
         and input_filter.high_cutoff_hz is not None
-        for input_filter in filters
+        and input_filter.high_cutoff_hz >= dataset._sample_frequency(index) + 100.0
+        for index, input_filter in enumerate(filters)
         if input_filter is not None and input_filter.kind == "lowpass"
     )
     assert all(
         input_filter is not None
         and input_filter.low_cutoff_hz is not None
         and input_filter.high_cutoff_hz is not None
-        and input_filter.low_cutoff_hz < input_filter.high_cutoff_hz
-        for input_filter in filters
+        and 100.0
+        <= input_filter.high_cutoff_hz - input_filter.low_cutoff_hz
+        <= 1_000.0
+        and input_filter.low_cutoff_hz
+        <= dataset._sample_frequency(index)
+        <= input_filter.high_cutoff_hz
+        for index, input_filter in enumerate(filters)
         if input_filter is not None and input_filter.kind == "bandpass"
     )
 

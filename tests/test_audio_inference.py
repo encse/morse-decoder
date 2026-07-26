@@ -11,11 +11,15 @@ from morse_timing.audio import (
     synthesize_morse_with_timing,
 )
 from morse_timing.audio_dataset import Stage1DatasetConfig
-from morse_timing.audio_inference import MorseAudioDecoder, _character_spans
+from morse_timing.audio_inference import (
+    MorseAudioDecoder,
+    _character_spans,
+    _input_filter_label,
+)
 from morse_timing.audio_model import AudioModelConfig, MorseAudioCTCModel
 from morse_timing.audio_tokens import AudioToken
 from morse_timing.audio_train import OverfitMetrics, save_checkpoint
-from morse_timing.inference_report import ctc_token_events
+from morse_timing.inference_report import _wrap_parameter_lines, ctc_token_events
 
 
 def test_saved_checkpoint_can_decode_synthesized_text(tmp_path: Path) -> None:
@@ -196,7 +200,7 @@ def test_explicit_analysis_filters_apply_to_clean_profile() -> None:
     bandpass = decoder._build_synthesized_input(
         "E",
         config,
-        bandpass_bandwidth_hz=500.0,
+        bandpass_bandwidth_hz=750.0,
     )
     automatic_filter_config = Stage1DatasetConfig(
         leading_silence_seconds=0.0,
@@ -206,18 +210,41 @@ def test_explicit_analysis_filters_apply_to_clean_profile() -> None:
     explicit_overrides_automatic = decoder._build_synthesized_input(
         "E",
         automatic_filter_config,
-        bandpass_bandwidth_hz=500.0,
+        bandpass_bandwidth_hz=750.0,
     )
 
     assert not np.array_equal(clean.waveform, lowpass.waveform)
     assert not np.array_equal(clean.waveform, bandpass.waveform)
     assert np.array_equal(bandpass.waveform, explicit_overrides_automatic.waveform)
+    assert bandpass.input_filter is not None
+    assert (
+        bandpass.input_filter.high_cutoff_hz
+        - bandpass.input_filter.low_cutoff_hz
+        == 750.0
+    )
+    assert (
+        bandpass.input_filter.low_cutoff_hz
+        <= config.audio.frequency_hz
+        <= bandpass.input_filter.high_cutoff_hz
+    )
     with pytest.raises(ValueError, match="cannot be combined"):
         decoder._build_synthesized_input(
             "E",
             config,
             lowpass_cutoff_hz=1_500.0,
-            bandpass_bandwidth_hz=500.0,
+            bandpass_bandwidth_hz=750.0,
+        )
+    with pytest.raises(ValueError, match="at least 100 Hz above"):
+        decoder._build_synthesized_input(
+            "E",
+            config,
+            lowpass_cutoff_hz=config.audio.frequency_hz + 99.0,
+        )
+    with pytest.raises(ValueError, match="between 100 and 1000"):
+        decoder._build_synthesized_input(
+            "E",
+            config,
+            bandpass_bandwidth_hz=99.0,
         )
 
 
@@ -239,6 +266,49 @@ def test_ctc_token_events_ignore_blanks_and_repeated_frames() -> None:
         AudioToken.END_CHARACTER,
     )
     assert tuple(event.time_seconds for event in events) == (0.2, 0.5, 0.6)
+
+
+def test_report_parameters_wrap_without_splitting_entries() -> None:
+    parameters = (
+        ("Profile", "random"),
+        ("Noise power", "30.4456"),
+        ("Low-pass", "0–1500 Hz"),
+        ("Band-pass", "100–1000 Hz"),
+    )
+
+    lines = _wrap_parameter_lines(parameters, max_characters=45)
+
+    assert lines == (
+        "Profile random   Noise power 30.4456",
+        "Low-pass 0–1500 Hz   Band-pass 100–1000 Hz",
+    )
+
+
+def test_synthesized_input_reports_the_actual_sampled_filter() -> None:
+    config = Stage1DatasetConfig(apply_input_filter=True)
+    decoder = MorseAudioDecoder(
+        MorseAudioCTCModel(
+            AudioModelConfig(
+                projection_size=8,
+                hidden_size=8,
+                dense_layers=2,
+            )
+        ),
+        config,
+        (),
+        torch.device("cpu"),
+    )
+
+    sample = decoder._build_synthesized_input(
+        "E",
+        config,
+        input_filter_seed=101,
+    )
+
+    assert sample.input_filter is not None
+    label = _input_filter_label(sample.input_filter)
+    assert sample.input_filter.kind.replace("pass", "-pass") in label
+    assert f"order {sample.input_filter.order}" in label
 
 
 def test_saved_checkpoint_decodes_and_resamples_external_wav(tmp_path: Path) -> None:

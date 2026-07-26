@@ -45,7 +45,11 @@ def main(argv: list[str] | None = None) -> None:
     examples = (
         ("clean", "clean", ()),
         ("lowpass-1500hz", "random", ("--lowpass-cutoff-hz", "1500")),
-        ("bandpass-500hz", "random", ("--bandpass-bandwidth-hz", "500")),
+        (
+            "bandpass-750hz",
+            "random",
+            ("--bandpass-bandwidth-hz", "750"),
+        ),
     )
     for name, profile, filter_options in examples:
         command = [

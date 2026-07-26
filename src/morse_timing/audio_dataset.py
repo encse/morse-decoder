@@ -273,10 +273,15 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             int(np.random.SeedSequence([self.seed, index, 15]).generate_state(1)[0])
         )
         nyquist_hz = self.config.audio.sample_rate / 2.0
+        frequency_hz = self._sample_frequency(index)
         order = int(rng.choice((2, 4)))
         if rng.random() < 0.5:
             maximum_cutoff = min(3_500.0, nyquist_hz * 0.95)
-            minimum_cutoff = min(300.0, maximum_cutoff)
+            minimum_cutoff = max(300.0, frequency_hz + 100.0)
+            if minimum_cutoff >= maximum_cutoff:
+                raise ValueError(
+                    "No valid low-pass cutoff at least 100 Hz above the Morse tone"
+                )
             cutoff = float(
                 np.exp(rng.uniform(np.log(minimum_cutoff), np.log(maximum_cutoff)))
             )
@@ -286,32 +291,20 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
                 order=order,
             )
 
-        maximum_bandwidth = min(1_200.0, nyquist_hz * 0.8)
-        minimum_bandwidth = min(150.0, maximum_bandwidth)
         bandwidth_hz = float(
-            np.exp(
-                rng.uniform(
-                    np.log(minimum_bandwidth),
-                    np.log(maximum_bandwidth),
-                )
-            )
+            np.exp(rng.uniform(np.log(100.0), np.log(1_000.0)))
         )
         center_hz = float(
             np.clip(
-                self._sample_frequency(index),
+                frequency_hz,
                 20.0 + bandwidth_hz / 2.0,
                 nyquist_hz * 0.975 - bandwidth_hz / 2.0,
             )
         )
-        low_cutoff_hz = max(20.0, center_hz - bandwidth_hz / 2.0)
-        high_cutoff_hz = min(
-            nyquist_hz * 0.975,
-            center_hz + bandwidth_hz / 2.0,
-        )
         return InputFilter(
             "bandpass",
-            low_cutoff_hz=low_cutoff_hz,
-            high_cutoff_hz=high_cutoff_hz,
+            low_cutoff_hz=center_hz - bandwidth_hz / 2.0,
+            high_cutoff_hz=center_hz + bandwidth_hz / 2.0,
             order=order,
         )
 
