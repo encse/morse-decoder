@@ -239,6 +239,20 @@ def test_generated_word_gaps_reproducibly_cover_normal_and_extended_ranges() -> 
     ) == dataset._sample_word_gap_multipliers(7, "E E")
 
 
+def test_render_exposes_the_exact_sequence_returned_to_the_trainer() -> None:
+    dataset = CleanAudioMorseDataset(10, seed=123)
+
+    rendered = dataset.render(7)
+    sequence = dataset[7]
+
+    assert rendered.sequence.text == sequence.text
+    assert torch.equal(rendered.sequence.spectrogram, sequence.spectrogram)
+    assert torch.equal(rendered.sequence.targets, sequence.targets)
+    assert torch.equal(rendered.sequence.tone_activity, sequence.tone_activity)
+    assert rendered.waveform.ndim == 1
+    assert rendered.parameters["index"] == 7
+
+
 def test_noise_only_samples_default_value() -> None:
 
     dataset = CleanAudioMorseDataset(1, seed=41)

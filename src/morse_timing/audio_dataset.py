@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 import numpy as np
+from numpy.typing import NDArray
 import torch
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
@@ -24,7 +25,11 @@ from morse_timing.audio import (
 )
 from morse_timing.audio_tokens import AudioToken, text_to_audio_tokens
 from morse_timing.morse import SUPPORTED_CHARACTERS, normalize_text
-from morse_timing.spectrogram import SpectrogramConfig, compute_log_magnitude_stft
+from morse_timing.spectrogram import (
+    Spectrogram,
+    SpectrogramConfig,
+    compute_log_magnitude_stft,
+)
 
 
 @dataclass(frozen=True)
@@ -152,6 +157,16 @@ class AudioSequenceSample:
 
 
 @dataclass(frozen=True)
+class RenderedTrainingSample:
+    """A training sample together with the exact waveform used to create it."""
+
+    sequence: AudioSequenceSample
+    waveform: NDArray[np.float32]
+    spectrogram: Spectrogram
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class InputFilter:
     """One reproducibly sampled receiver-like filter for a complete input."""
 
@@ -159,6 +174,19 @@ class InputFilter:
     low_cutoff_hz: float | None = None
     high_cutoff_hz: float | None = None
     order: int = 4
+
+
+def _input_filter_parameters(input_filter: InputFilter | None) -> dict[str, Any] | None:
+    """Return a JSON-serializable description of one sampled input filter."""
+
+    if input_filter is None:
+        return None
+    return {
+        "kind": input_filter.kind,
+        "low_cutoff_hz": input_filter.low_cutoff_hz,
+        "high_cutoff_hz": input_filter.high_cutoff_hz,
+        "order": input_filter.order,
+    }
 
 
 @dataclass(frozen=True)
@@ -210,49 +238,95 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
         return self.size
 
     def __getitem__(self, index: int) -> AudioSequenceSample:
+        """Generate the same model-ready sequence exposed by ``render``."""
+
+        return self.render(index).sequence
+
+    def render(self, index: int) -> RenderedTrainingSample:
+        """Generate one training item and retain its waveform and parameters."""
+
         if index < 0:
             index += self.size
         if index < 0 or index >= self.size:
             raise IndexError(index)
         if self.texts is None and self._is_noise_only(index):
-            return build_noise_only_sequence_sample(
+            duration_seconds = self._sample_noise_only_duration(index)
+            noise_power = max(
+                self.config.min_noise_only_power,
+                self._sample_noise_power(index),
+            )
+            amplitude_percent = self._sample_amplitude_percent(index)
+            input_filter = self._sample_input_filter(index)
+            return render_noise_only_sequence_sample(
                 self.config,
-                duration_seconds=self._sample_noise_only_duration(index),
+                duration_seconds=duration_seconds,
                 noise_seed=int(
                     np.random.SeedSequence([self.seed, index, 4]).generate_state(1)[0]
                 ),
-                noise_power=max(
-                    self.config.min_noise_only_power,
-                    self._sample_noise_power(index),
-                ),
-                amplitude_percent=self._sample_amplitude_percent(index),
-                input_filter=self._sample_input_filter(index),
+                noise_power=noise_power,
+                amplitude_percent=amplitude_percent,
+                input_filter=input_filter,
+                parameters={
+                    "index": index,
+                    "noise_only": True,
+                    "duration_seconds": duration_seconds,
+                    "noise_power": noise_power,
+                    "amplitude_percent": amplitude_percent,
+                    "input_filter": _input_filter_parameters(input_filter),
+                },
             )
         text = self.texts[index] if self.texts is not None else self._random_text(index)
-        return build_audio_sequence_sample(
+        wpm = self._sample_wpm(index)
+        frequency_hz = self._sample_frequency(index)
+        noise_percent = self._sample_noise_percent(index)
+        noise_power = self._sample_noise_power(index)
+        amplitude_percent = self._sample_amplitude_percent(index)
+        fade_depth_percent = self._sample_fade_depth(index)
+        fade_frequency_hz = self._sample_fade_frequency(index)
+        fade_phase_radians = self._sample_fade_phase(index)
+        rise_fall_ms = self._sample_rise_fall(index)
+        input_filter = self._sample_input_filter(index)
+        word_gap_multipliers = (
+            None
+            if self.texts is not None
+            else self._sample_word_gap_multipliers(index, text)
+        )
+        return render_audio_sequence_sample(
             text,
             self.config,
-            wpm=self._sample_wpm(index),
-            frequency_hz=self._sample_frequency(index),
+            wpm=wpm,
+            frequency_hz=frequency_hz,
             timing_seed=int(
                 np.random.SeedSequence([self.seed, index, 3]).generate_state(1)[0]
             ),
             noise_seed=int(
                 np.random.SeedSequence([self.seed, index, 4]).generate_state(1)[0]
             ),
-            noise_percent=self._sample_noise_percent(index),
-            noise_power=self._sample_noise_power(index),
-            amplitude_percent=self._sample_amplitude_percent(index),
-            fade_depth_percent=self._sample_fade_depth(index),
-            fade_frequency_hz=self._sample_fade_frequency(index),
-            fade_phase_radians=self._sample_fade_phase(index),
-            rise_fall_ms=self._sample_rise_fall(index),
-            input_filter=self._sample_input_filter(index),
-            word_gap_multipliers=(
-                None
-                if self.texts is not None
-                else self._sample_word_gap_multipliers(index, text)
-            ),
+            noise_percent=noise_percent,
+            noise_power=noise_power,
+            amplitude_percent=amplitude_percent,
+            fade_depth_percent=fade_depth_percent,
+            fade_frequency_hz=fade_frequency_hz,
+            fade_phase_radians=fade_phase_radians,
+            rise_fall_ms=rise_fall_ms,
+            input_filter=input_filter,
+            word_gap_multipliers=word_gap_multipliers,
+            parameters={
+                "index": index,
+                "noise_only": False,
+                "text": text,
+                "wpm": wpm,
+                "frequency_hz": frequency_hz,
+                "noise_percent": noise_percent,
+                "noise_power": noise_power,
+                "amplitude_percent": amplitude_percent,
+                "fade_depth_percent": fade_depth_percent,
+                "fade_frequency_hz": fade_frequency_hz,
+                "fade_phase_radians": fade_phase_radians,
+                "rise_fall_ms": rise_fall_ms,
+                "word_gap_multipliers": list(word_gap_multipliers or ()),
+                "input_filter": _input_filter_parameters(input_filter),
+            },
         )
 
     def _is_noise_only(self, index: int) -> bool:
@@ -513,7 +587,7 @@ def build_tone_activity(
     return tone_activity
 
 
-def build_audio_sequence_sample(
+def render_audio_sequence_sample(
     text: str,
     config: Stage1DatasetConfig | None = None,
     *,
@@ -530,8 +604,9 @@ def build_audio_sequence_sample(
     rise_fall_ms: float | None = None,
     word_gap_multipliers: Sequence[int] | None = None,
     input_filter: InputFilter | None = None,
-) -> AudioSequenceSample:
-    """Create one model-ready clean audio sample from caller-supplied text."""
+    parameters: dict[str, Any] | None = None,
+) -> RenderedTrainingSample:
+    """Create one model-ready sample and retain its exact rendered waveform."""
 
     selected_config = config or Stage1DatasetConfig()
     normalized_text = normalize_text(text)
@@ -632,15 +707,60 @@ def build_audio_sequence_sample(
         [int(token) for token in text_to_audio_tokens(normalized_text)],
         dtype=torch.long,
     )
-    return AudioSequenceSample(
+    sequence = AudioSequenceSample(
         spectrogram=features,
         targets=targets,
         tone_activity=tone_activity,
         text=normalized_text,
     )
+    return RenderedTrainingSample(
+        sequence=sequence,
+        waveform=waveform,
+        spectrogram=spectrogram,
+        parameters={} if parameters is None else parameters,
+    )
 
 
-def build_noise_only_sequence_sample(
+def build_audio_sequence_sample(
+    text: str,
+    config: Stage1DatasetConfig | None = None,
+    *,
+    wpm: float | None = None,
+    frequency_hz: float | None = None,
+    timing_seed: int = 0,
+    noise_seed: int = 0,
+    noise_percent: float | None = None,
+    noise_power: float | None = None,
+    amplitude_percent: float | None = None,
+    fade_depth_percent: float | None = None,
+    fade_frequency_hz: float | None = None,
+    fade_phase_radians: float = 0.0,
+    rise_fall_ms: float | None = None,
+    word_gap_multipliers: Sequence[int] | None = None,
+    input_filter: InputFilter | None = None,
+) -> AudioSequenceSample:
+    """Create one model-ready clean audio sample from caller-supplied text."""
+
+    return render_audio_sequence_sample(
+        text,
+        config,
+        wpm=wpm,
+        frequency_hz=frequency_hz,
+        timing_seed=timing_seed,
+        noise_seed=noise_seed,
+        noise_percent=noise_percent,
+        noise_power=noise_power,
+        amplitude_percent=amplitude_percent,
+        fade_depth_percent=fade_depth_percent,
+        fade_frequency_hz=fade_frequency_hz,
+        fade_phase_radians=fade_phase_radians,
+        rise_fall_ms=rise_fall_ms,
+        word_gap_multipliers=word_gap_multipliers,
+        input_filter=input_filter,
+    ).sequence
+
+
+def render_noise_only_sequence_sample(
     config: Stage1DatasetConfig,
     *,
     duration_seconds: float,
@@ -648,8 +768,9 @@ def build_noise_only_sequence_sample(
     noise_power: float,
     amplitude_percent: float,
     input_filter: InputFilter | None = None,
-) -> AudioSequenceSample:
-    """Create one negative example containing noise without a Morse signal."""
+    parameters: dict[str, Any] | None = None,
+) -> RenderedTrainingSample:
+    """Create one negative sample and retain its exact rendered waveform."""
 
     sample_count = round(duration_seconds * config.audio.sample_rate)
     waveform = np.zeros(sample_count, dtype=np.float32)
@@ -677,12 +798,39 @@ def build_noise_only_sequence_sample(
         spectrogram.values,
         config.spectrogram,
     ).transpose(0, 1).contiguous()
-    return AudioSequenceSample(
+    sequence = AudioSequenceSample(
         spectrogram=features,
         targets=torch.empty(0, dtype=torch.long),
         tone_activity=torch.zeros(features.shape[0], dtype=torch.float32),
         text="",
     )
+    return RenderedTrainingSample(
+        sequence=sequence,
+        waveform=waveform,
+        spectrogram=spectrogram,
+        parameters={} if parameters is None else parameters,
+    )
+
+
+def build_noise_only_sequence_sample(
+    config: Stage1DatasetConfig,
+    *,
+    duration_seconds: float,
+    noise_seed: int,
+    noise_power: float,
+    amplitude_percent: float,
+    input_filter: InputFilter | None = None,
+) -> AudioSequenceSample:
+    """Create one negative example containing noise without a Morse signal."""
+
+    return render_noise_only_sequence_sample(
+        config,
+        duration_seconds=duration_seconds,
+        noise_seed=noise_seed,
+        noise_power=noise_power,
+        amplitude_percent=amplitude_percent,
+        input_filter=input_filter,
+    ).sequence
 
 
 def restore_stage1_dataset_config(values: dict[str, Any]) -> Stage1DatasetConfig:

@@ -290,6 +290,21 @@ below the time axis, with faint dashed guides crossing the spectrogram. Its
 header records the model and signal parameters; the decoded text is printed
 below the visualization.
 
+Export exact trainer-generated inputs for visual inspection:
+
+```bash
+conda run -n morse python generate_training_samples.py \
+    models/final.json \
+    15 \
+    --output-directory analysis/training-samples \
+    --seed 42
+```
+
+Each sample is saved as a matching WAV/PNG/JSON triplet. Its JSON records the
+generated text, word-gap multipliers, WPM, carrier frequency, noise, fading,
+amplitude, and receiver filter. The exporter and the trainer share the same
+dataset rendering path, so a given seed and sample index produce the same input.
+
 Decode an external uncompressed PCM WAV file:
 
 ```bash
