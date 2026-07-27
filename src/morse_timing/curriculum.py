@@ -392,7 +392,7 @@ def _run_adaptive_plan(
     """Expand one random range after validation reaches the configured threshold."""
 
     adaptive = dict(plan["adaptive"])
-    threshold = float(adaptive.get("exact_text_threshold", 0.9))
+    threshold = float(adaptive.get("exact_text_threshold", 0.95))
     target_epochs = int(adaptive.get("required_epochs", 2))
     max_epochs_per_dimension = int(adaptive.get("max_epochs_per_dimension", 50))
     configured_selection_seed = int(
