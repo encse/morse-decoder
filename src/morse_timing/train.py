@@ -270,7 +270,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-characters", type=int)
     parser.add_argument("--space-probability", type=float)
     parser.add_argument("--word-boundary-sample-probability", type=float)
-    parser.add_argument("--doubled-space-probability", type=float)
+    parser.add_argument(
+        "--extended-space-probability",
+        "--doubled-space-probability",
+        dest="extended_space_probability",
+        type=float,
+    )
+    parser.add_argument("--min-extended-space-multiplier", type=int)
+    parser.add_argument("--max-extended-space-multiplier", type=int)
     parser.add_argument("--noise-only-probability", type=float)
     parser.add_argument(
         "--input-filter",
@@ -397,7 +404,13 @@ def main(argv: list[str] | None = None) -> None:
                 "word_boundary_sample_probability": (
                     args.word_boundary_sample_probability
                 ),
-                "doubled_space_probability": args.doubled_space_probability,
+                "extended_space_probability": args.extended_space_probability,
+                "min_extended_space_multiplier": (
+                    args.min_extended_space_multiplier
+                ),
+                "max_extended_space_multiplier": (
+                    args.max_extended_space_multiplier
+                ),
                 "noise_only_probability": args.noise_only_probability,
                 "apply_input_filter": args.input_filter,
             }.items()

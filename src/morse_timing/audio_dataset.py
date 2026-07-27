@@ -50,7 +50,9 @@ class Stage1DatasetConfig:
     max_characters: int = 12
     space_probability: float = 0.12
     word_boundary_sample_probability: float = 0.5
-    doubled_space_probability: float = 0.5
+    extended_space_probability: float = 0.5
+    min_extended_space_multiplier: int = 2
+    max_extended_space_multiplier: int = 20
     leading_silence_seconds: float = 0.7
     trailing_silence_seconds: float = 0.7
     noise_only_probability: float = 0.20
@@ -88,8 +90,16 @@ class Stage1DatasetConfig:
             raise ValueError(
                 "Word-boundary sample probability must be between zero and one"
             )
-        if not 0.0 <= self.doubled_space_probability <= 1.0:
-            raise ValueError("Doubled-space probability must be between zero and one")
+        if not 0.0 <= self.extended_space_probability <= 1.0:
+            raise ValueError("Extended-space probability must be between zero and one")
+        if (
+            self.min_extended_space_multiplier < 2
+            or self.max_extended_space_multiplier
+            < self.min_extended_space_multiplier
+        ):
+            raise ValueError(
+                "Extended-space multiplier range must be ordered and start at two"
+            )
         if self.timing_jitter < 0.0:
             raise ValueError("Timing jitter cannot be negative")
         if self.noise_power < 0.0:
@@ -238,10 +248,10 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
             fade_phase_radians=self._sample_fade_phase(index),
             rise_fall_ms=self._sample_rise_fall(index),
             input_filter=self._sample_input_filter(index),
-            doubled_word_gaps=(
+            word_gap_multipliers=(
                 None
                 if self.texts is not None
-                else self._sample_doubled_word_gaps(index, text)
+                else self._sample_word_gap_multipliers(index, text)
             ),
         )
 
@@ -313,18 +323,27 @@ class CleanAudioMorseDataset(Dataset[AudioSequenceSample]):
 
         return self._sample_input_filter(index)
 
-    def _sample_doubled_word_gaps(
+    def _sample_word_gap_multipliers(
         self,
         index: int,
         text: str,
-    ) -> tuple[bool, ...]:
-        """Choose normal or doubled duration for every generated word boundary."""
+    ) -> tuple[int, ...]:
+        """Choose normal or extended duration for every generated word boundary."""
 
         rng = np.random.default_rng(
             int(np.random.SeedSequence([self.seed, index, 12]).generate_state(1)[0])
         )
         return tuple(
-            bool(rng.random() < self.config.doubled_space_probability)
+            (
+                int(
+                    rng.integers(
+                        self.config.min_extended_space_multiplier,
+                        self.config.max_extended_space_multiplier + 1,
+                    )
+                )
+                if rng.random() < self.config.extended_space_probability
+                else 1
+            )
             for _ in range(text.count(" "))
         )
 
@@ -509,7 +528,7 @@ def build_audio_sequence_sample(
     fade_frequency_hz: float | None = None,
     fade_phase_radians: float = 0.0,
     rise_fall_ms: float | None = None,
-    doubled_word_gaps: Sequence[bool] | None = None,
+    word_gap_multipliers: Sequence[int] | None = None,
     input_filter: InputFilter | None = None,
 ) -> AudioSequenceSample:
     """Create one model-ready clean audio sample from caller-supplied text."""
@@ -534,7 +553,7 @@ def build_audio_sequence_sample(
         audio_config,
         timing_jitter=selected_config.timing_jitter,
         rng=np.random.default_rng(timing_seed),
-        doubled_word_gaps=doubled_word_gaps,
+        word_gap_multipliers=word_gap_multipliers,
     )
     leading_samples = round(
         selected_config.leading_silence_seconds * audio_config.sample_rate
@@ -671,6 +690,12 @@ def restore_stage1_dataset_config(values: dict[str, Any]) -> Stage1DatasetConfig
 
     restored = dict(values)
     restored.pop("synthesis_profile", None)
+    legacy_probability = restored.pop("doubled_space_probability", None)
+    if (
+        "extended_space_probability" not in restored
+        and legacy_probability is not None
+    ):
+        restored["extended_space_probability"] = legacy_probability
     if "noise_power" not in restored:
         restored["noise_power"] = 0.0
         restored["min_amplitude_percent"] = 100.0

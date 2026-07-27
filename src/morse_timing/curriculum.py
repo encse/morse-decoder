@@ -166,7 +166,7 @@ def _training_command(
         "--num-workers",
         str(training.get("num_workers", 0)),
         "--regenerate-every",
-        str(training.get("regenerate_every", 5)),
+        str(training.get("regenerate_every", 10)),
         "--perfect-epochs",
         str(training.get("perfect_epochs", 5)),
         "--device",
