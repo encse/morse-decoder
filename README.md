@@ -48,9 +48,9 @@ text
 
 Training samples independently vary speed, carrier frequency, timing jitter,
 noise power, amplitude, fading, and keying edge duration. The effective ranges
-are saved in every checkpoint. Every generated word boundary is randomly
-rendered as either the standard seven-unit gap or a doubled fourteen-unit gap,
-without adding another output character.
+are saved in every checkpoint. Every generated word boundary uses the standard
+seven-unit gap with 50% probability; otherwise its duration is sampled uniformly
+from 2–20 times that gap, without adding another output character.
 
 ### Input filters
 

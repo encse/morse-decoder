@@ -1,43 +1,9 @@
 {
-  "best_character_error_rate": 0.07293035479632064,
-  "best_token_error_rate": 0.006262067525961488,
-  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.stages/stage-065.pt",
-  "curriculum_ranges": {
-    "amplitude": [
-      30.0,
-      150.0
-    ],
-    "fade_depth": [
-      0.0,
-      60.0
-    ],
-    "fade_frequency": [
-      0.1,
-      2.0
-    ],
-    "frequency": [
-      100.0,
-      2000.0
-    ],
-    "jitter": [
-      0.0,
-      0.08
-    ],
-    "noise_power": [
-      0.0,
-      40.0
-    ],
-    "rise_fall": [
-      0.0,
-      10.0
-    ],
-    "wpm": [
-      10.0,
-      40.0
-    ]
-  },
-  "curriculum_stage": 65,
+  "best_character_error_rate": 0.07582128777923784,
+  "best_token_error_rate": 0.006053331941762772,
+  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.pt",
   "dataset_config": {
+    "apply_input_filter": true,
     "audio": {
       "amplitude": 0.5,
       "frequency_hz": 700.0,
@@ -54,7 +20,7 @@
     "max_noise_only_seconds": 4.0,
     "max_rise_fall_ms": 10.0,
     "max_wpm": 40.0,
-    "min_amplitude_percent": 30.0,
+    "min_amplitude_percent": 20.0,
     "min_characters": 2,
     "min_fade_frequency_hz": 0.1,
     "min_frequency_hz": 100.0,
@@ -64,7 +30,7 @@
     "min_wpm": 10.0,
     "noise_only_probability": 0.2,
     "noise_percent": 0.0,
-    "noise_power": 40.0,
+    "noise_power": 50.0,
     "space_probability": 0.12,
     "spectrogram": {
       "frequency_bins": 65,
@@ -79,7 +45,7 @@
     "word_boundary_sample_probability": 0.5,
     "wpm": 20.0
   },
-  "epoch": 2,
+  "epoch": 5,
   "experiment": {
     "curriculum_target_reached": true,
     "perfect_epochs": 5,
@@ -93,14 +59,14 @@
   },
   "format_version": 1,
   "metrics": {
-    "character_error_rate": 0.06780551905387648,
-    "ctc_loss": 0.02322864648575584,
-    "exact_text_accuracy": 0.915,
-    "exact_token_accuracy": 0.915,
+    "character_error_rate": 0.10289093298291721,
+    "ctc_loss": 0.02667599024406324,
+    "exact_text_accuracy": 0.9033333333333333,
+    "exact_token_accuracy": 0.9025,
     "example_prediction": "_3UJPP )=",
     "example_reference": "_3UJPP )=",
-    "loss": 0.0539014957845211,
-    "token_error_rate": 0.006366435318060846
+    "loss": 0.05845117335518201,
+    "token_error_rate": 0.007618848823253144
   },
   "model_config": {
     "auxiliary_heads": true,
