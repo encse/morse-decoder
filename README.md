@@ -176,8 +176,14 @@ Upload the current bundle as a new private Kaggle Dataset version:
 
 ```bash
 conda activate morse
-python upload_kaggle.py <yourname>/morsestuff --archive morse.zip
+python upload_kaggle.py <yourname>/morsestuff \
+    --archive morse.zip \
+    --upload-model-dir models
 ```
+
+Omit `--upload-model-dir` to build a source-only bundle. When provided, the
+directory's immediate files are added under the archive's top-level `models/`
+directory; subdirectories are ignored.
 
 Use this as the first notebook cell. The current bundle contains `morse/` for
 source and `models/` for checkpoints, so both are extracted directly below

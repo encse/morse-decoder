@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -577,6 +578,9 @@ def main(argv: list[str] | None = None) -> None:
                 f"regenerating_train epoch={epoch} seed={regeneration_seed}",
                 flush=True,
             )
+            del training_loader
+            del training_dataset
+            gc.collect()
             training_dataset = cache_dataset(
                 CleanAudioMorseDataset(
                     args.train_samples,
