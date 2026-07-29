@@ -36,6 +36,29 @@ class TimedToken:
     time_seconds: float
 
 
+def _wrap_parameter_lines(
+    parameters: Sequence[tuple[str, str]],
+    max_characters: int = 115,
+) -> tuple[str, ...]:
+    """Wrap complete parameter entries without splitting a label from its value."""
+
+    if max_characters <= 0:
+        raise ValueError("Maximum parameter line length must be positive")
+    lines: list[str] = []
+    current = ""
+    for name, value in parameters:
+        entry = f"{name} {value}"
+        candidate = f"{current}   {entry}" if current else entry
+        if current and len(candidate) > max_characters:
+            lines.append(current)
+            current = entry
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return tuple(lines)
+
+
 def ctc_token_events(
     frame_tokens: Sequence[AudioToken | int],
     frame_times_seconds: Sequence[float],
@@ -77,7 +100,7 @@ def save_inference_report(
     grid = figure.add_gridspec(
         2,
         1,
-        height_ratios=(1.55, 6.3),
+        height_ratios=(2.1, 6.3),
         hspace=0.12,
         left=0.075,
         right=0.94,
@@ -118,11 +141,12 @@ def save_inference_report(
     )
     header.text(
         0.0,
-        0.20,
-        "   ".join(f"{name} {value}" for name, value in parameters),
+        0.31,
+        "\n".join(_wrap_parameter_lines(parameters)),
         color="#aeb8c5",
         fontsize=8.5,
-        va="bottom",
+        linespacing=1.3,
+        va="top",
     )
 
     duration = spectrogram.duration_seconds

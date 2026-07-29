@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -270,8 +271,21 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-characters", type=int)
     parser.add_argument("--space-probability", type=float)
     parser.add_argument("--word-boundary-sample-probability", type=float)
-    parser.add_argument("--doubled-space-probability", type=float)
+    parser.add_argument(
+        "--extended-space-probability",
+        "--doubled-space-probability",
+        dest="extended_space_probability",
+        type=float,
+    )
+    parser.add_argument("--min-extended-space-multiplier", type=int)
+    parser.add_argument("--max-extended-space-multiplier", type=int)
     parser.add_argument("--noise-only-probability", type=float)
+    parser.add_argument(
+        "--input-filter",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Apply a sampled receiver filter to every generated input",
+    )
     parser.add_argument("--hidden-size", type=int)
     parser.add_argument("--projection-size", type=int)
     parser.add_argument("--gru-layers", type=int)
@@ -391,8 +405,15 @@ def main(argv: list[str] | None = None) -> None:
                 "word_boundary_sample_probability": (
                     args.word_boundary_sample_probability
                 ),
-                "doubled_space_probability": args.doubled_space_probability,
+                "extended_space_probability": args.extended_space_probability,
+                "min_extended_space_multiplier": (
+                    args.min_extended_space_multiplier
+                ),
+                "max_extended_space_multiplier": (
+                    args.max_extended_space_multiplier
+                ),
                 "noise_only_probability": args.noise_only_probability,
+                "apply_input_filter": args.input_filter,
             }.items()
             if value is not None
         },
@@ -557,6 +578,9 @@ def main(argv: list[str] | None = None) -> None:
                 f"regenerating_train epoch={epoch} seed={regeneration_seed}",
                 flush=True,
             )
+            del training_loader
+            del training_dataset
+            gc.collect()
             training_dataset = cache_dataset(
                 CleanAudioMorseDataset(
                     args.train_samples,

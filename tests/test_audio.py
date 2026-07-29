@@ -86,19 +86,19 @@ def test_text_to_segments_uses_ideal_morse_ratios() -> None:
     ]
 
 
-def test_existing_word_gap_can_be_randomized_to_twice_its_normal_duration() -> None:
-    normal = text_to_segments("E E", (False,))
-    doubled = text_to_segments("E E", (True,))
+def test_existing_word_gap_can_be_extended_by_a_selected_multiplier() -> None:
+    normal = text_to_segments("E E", (1,))
+    extended = text_to_segments("E E", (20,))
 
     normal_gap = next(
         segment for segment in normal if not segment.is_tone and segment.units > 3
     )
-    doubled_gap = next(
-        segment for segment in doubled if not segment.is_tone and segment.units > 3
+    extended_gap = next(
+        segment for segment in extended if not segment.is_tone and segment.units > 3
     )
 
     assert normal_gap.units == 7
-    assert doubled_gap.units == 14
+    assert extended_gap.units == 140
 
 
 def test_synthesis_has_exact_expected_duration_and_bounded_amplitude() -> None:

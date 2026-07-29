@@ -3,7 +3,7 @@
   "output_directory": "models",
   "reference_wav": "reference.wav",
   "adaptive": {
-    "exact_text_threshold": 0.9,
+    "exact_text_threshold": 0.95,
     "required_epochs": 2,
     "max_epochs_per_dimension": 50,
     "selection_seed": 42
@@ -18,7 +18,7 @@
     "device": "auto",
     "learning_rate": 0.0008,
     "minimum_learning_rate": 0.0001,
-    "regenerate_every": 5,
+    "regenerate_every": 10,
     "perfect_epochs": 5
   },
   "dimensions": {

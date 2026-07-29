@@ -13,13 +13,21 @@ offline and live inference plus stateful ONNX export.
 
 ![Clean HELLO WORLD inference analysis](analysis/hello-world-clean.png)
 
-### Random supported-range signal
+### 1500 Hz low-pass signal
 
-[Listen to the random WAV](analysis/hello-world-random.wav)
+[Listen to the low-pass WAV](analysis/hello-world-lowpass-1500hz.wav)
 
-![Random HELLO WORLD inference analysis](analysis/hello-world-random.png)
+![1500 Hz low-pass HELLO WORLD inference analysis](analysis/hello-world-lowpass-1500hz.png)
 
-Regenerate both examples with `models/final.pt` and random seed `42`:
+### 750 Hz-wide band-pass signal
+
+[Listen to the band-pass WAV](analysis/hello-world-bandpass-750hz.wav)
+
+![750 Hz-wide band-pass HELLO WORLD inference analysis](analysis/hello-world-bandpass-750hz.png)
+
+Regenerate all three examples with `models/final.pt`. The two filtered
+examples use the same random supported-range condition and background noise,
+so only their explicit receiver filter differs:
 
 ```bash
 python generate_analysis.py
@@ -40,9 +48,32 @@ text
 
 Training samples independently vary speed, carrier frequency, timing jitter,
 noise power, amplitude, fading, and keying edge duration. The effective ranges
-are saved in every checkpoint. Every generated word boundary is randomly
-rendered as either the standard seven-unit gap or a doubled fourteen-unit gap,
-without adding another output character. 
+are saved in every checkpoint. Every generated word boundary uses the standard
+seven-unit gap with 50% probability; otherwise its duration is sampled uniformly
+from 2–20 times that gap, without adding another output character.
+
+### Input filters
+
+Every generated input, including both Morse-bearing and noise-only samples,
+gets one reproducibly sampled receiver-style filter after the signal, noise,
+fading, and recording gain have been combined:
+
+- 50% low-pass: logarithmically sampled cutoff from at least 100 Hz above
+  the Morse tone up to 3500 Hz;
+- 50% band-pass: logarithmically sampled 100–1000 Hz bandwidth centered on
+  the Morse tone (clipped only near the spectrum boundaries);
+- both use a randomly selected second- or fourth-order smooth
+  Butterworth-style magnitude response and preserve the input RMS.
+
+There are exactly two automatic exceptions. The first curriculum stage, which
+creates a model from scratch, stays unfiltered even when that stage is resumed.
+All later stages enable the filters. Synthesized analysis with `--profile
+clean` is also unfiltered, while `--profile random` applies the same
+receiver-filter sampling. The separate `--lowpass-cutoff-hz` and
+`--bandpass-bandwidth-hz` analysis options can add an explicitly requested
+filter after profile processing. Explicit low-pass cutoffs must also be at
+least 100 Hz above the selected Morse tone, and explicit band-pass bandwidths
+must be between 100 and 1000 Hz.
 
 ## Setup and tests
 
@@ -66,7 +97,8 @@ python -m pip install -e ".[kaggle-upload]" # dataset upload
 
 The complete training configuration is in `curriculum-plan.json`. The first
 stage creates the model from scratch using one exact starting value for every
-dimension. Later stages widen one randomly selected dimension by one step
+dimension and does not apply receiver filtering. Later stages enable receiver
+filtering and widen one randomly selected dimension by one step
 until decoded-text accuracy reaches the configured threshold for the required
 number of epochs. A failed dimension is set aside and another unfinished
 dimension is selected reproducibly.
@@ -144,8 +176,14 @@ Upload the current bundle as a new private Kaggle Dataset version:
 
 ```bash
 conda activate morse
-python upload_kaggle.py <yourname>/morsestuff --archive morse.zip
+python upload_kaggle.py <yourname>/morsestuff \
+    --archive morse.zip \
+    --upload-model-dir models
 ```
+
+Omit `--upload-model-dir` to build a source-only bundle. When provided, the
+directory's immediate files are added under the archive's top-level `models/`
+directory; subdirectories are ignored.
 
 Use this as the first notebook cell. The current bundle contains `morse/` for
 source and `models/` for checkpoints, so both are extracted directly below
@@ -257,6 +295,21 @@ Morse audio spans. The model's time-aligned collapsed CTC token labels sit
 below the time axis, with faint dashed guides crossing the spectrogram. Its
 header records the model and signal parameters; the decoded text is printed
 below the visualization.
+
+Export exact trainer-generated inputs for visual inspection:
+
+```bash
+conda run -n morse python generate_training_samples.py \
+    models/final.json \
+    15 \
+    --output-directory analysis/training-samples \
+    --seed 42
+```
+
+Each sample is saved as a matching WAV/PNG/JSON triplet. Its JSON records the
+generated text, word-gap multipliers, WPM, carrier frequency, noise, fading,
+amplitude, and receiver filter. The exporter and the trainer share the same
+dataset rendering path, so a given seed and sample index produce the same input.
 
 Decode an external uncompressed PCM WAV file:
 

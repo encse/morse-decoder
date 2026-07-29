@@ -1,61 +1,29 @@
 {
-  "best_character_error_rate": 0.07293035479632064,
-  "best_token_error_rate": 0.006262067525961488,
-  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.stages/stage-065.pt",
-  "curriculum_ranges": {
-    "amplitude": [
-      30.0,
-      150.0
-    ],
-    "fade_depth": [
-      0.0,
-      60.0
-    ],
-    "fade_frequency": [
-      0.1,
-      2.0
-    ],
-    "frequency": [
-      100.0,
-      2000.0
-    ],
-    "jitter": [
-      0.0,
-      0.08
-    ],
-    "noise_power": [
-      0.0,
-      40.0
-    ],
-    "rise_fall": [
-      0.0,
-      10.0
-    ],
-    "wpm": [
-      10.0,
-      40.0
-    ]
-  },
-  "curriculum_stage": 65,
+  "best_character_error_rate": 0.03442838370565046,
+  "best_token_error_rate": 0.0024004592182852373,
+  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.working-stage-064.pt",
   "dataset_config": {
+    "apply_input_filter": true,
     "audio": {
       "amplitude": 0.5,
       "frequency_hz": 700.0,
       "rise_fall_ms": 0.0,
       "sample_rate": 8000
     },
-    "doubled_space_probability": 0.5,
+    "extended_space_probability": 0.5,
     "fade_depth_percent": 60.0,
     "leading_silence_seconds": 0.7,
     "max_amplitude_percent": 150.0,
     "max_characters": 12,
+    "max_extended_space_multiplier": 20,
     "max_fade_frequency_hz": 2.0,
     "max_frequency_hz": 2000.0,
     "max_noise_only_seconds": 4.0,
     "max_rise_fall_ms": 10.0,
     "max_wpm": 40.0,
-    "min_amplitude_percent": 30.0,
+    "min_amplitude_percent": 40.0,
     "min_characters": 2,
+    "min_extended_space_multiplier": 2,
     "min_fade_frequency_hz": 0.1,
     "min_frequency_hz": 100.0,
     "min_noise_only_power": 1.0,
@@ -79,28 +47,28 @@
     "word_boundary_sample_probability": 0.5,
     "wpm": 20.0
   },
-  "epoch": 2,
+  "epoch": 14,
   "experiment": {
-    "curriculum_target_reached": true,
+    "curriculum_target_reached": false,
     "perfect_epochs": 5,
-    "regenerate_every": 5,
+    "regenerate_every": 10,
     "seed": 42,
     "target_epochs": 2,
-    "target_exact_text": 0.9,
+    "target_exact_text": 0.95,
     "tone_activity_loss_weight": 0.3,
     "train_samples": 12000,
     "validation_samples": 1200
   },
   "format_version": 1,
   "metrics": {
-    "character_error_rate": 0.06780551905387648,
-    "ctc_loss": 0.02322864648575584,
-    "exact_text_accuracy": 0.915,
-    "exact_token_accuracy": 0.915,
+    "character_error_rate": 0.03442838370565046,
+    "ctc_loss": 0.008314968204746644,
+    "exact_text_accuracy": 0.9525,
+    "exact_token_accuracy": 0.9525,
     "example_prediction": "_3UJPP )=",
     "example_reference": "_3UJPP )=",
-    "loss": 0.0539014957845211,
-    "token_error_rate": 0.006366435318060846
+    "loss": 0.032778759946425755,
+    "token_error_rate": 0.0024004592182852373
   },
   "model_config": {
     "auxiliary_heads": true,

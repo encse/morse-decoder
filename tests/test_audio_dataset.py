@@ -201,7 +201,7 @@ def test_tone_activity_marks_frames_that_overlap_the_tone() -> None:
     assert sample.tone_activity[3:].sum() == 0.0
 
 
-def test_doubled_word_gap_changes_only_audio_duration_not_the_ctc_target() -> None:
+def test_extended_word_gap_changes_only_audio_duration_not_the_ctc_target() -> None:
     config = Stage1DatasetConfig(
         wpm=20.0,
         leading_silence_seconds=0.0,
@@ -210,31 +210,47 @@ def test_doubled_word_gap_changes_only_audio_duration_not_the_ctc_target() -> No
     normal = build_audio_sequence_sample(
         "E E",
         config,
-        doubled_word_gaps=(False,),
+        word_gap_multipliers=(1,),
     )
-    doubled = build_audio_sequence_sample(
+    extended = build_audio_sequence_sample(
         "E E",
         config,
-        doubled_word_gaps=(True,),
+        word_gap_multipliers=(20,),
     )
 
-    assert doubled.input_length - normal.input_length == 21
-    assert torch.equal(doubled.targets, normal.targets)
-    assert doubled.text == normal.text == "E E"
+    assert extended.input_length - normal.input_length == 399
+    assert torch.equal(extended.targets, normal.targets)
+    assert extended.text == normal.text == "E E"
 
 
-def test_generated_word_gaps_reproducibly_include_both_durations() -> None:
+def test_generated_word_gaps_reproducibly_cover_normal_and_extended_ranges() -> None:
     dataset = CleanAudioMorseDataset(1, seed=123)
-    sampled = {
-        doubled
+    sampled = [
+        multiplier
         for index in range(100)
-        for doubled in dataset._sample_doubled_word_gaps(index, "E E E")
-    }
+        for multiplier in dataset._sample_word_gap_multipliers(index, "E E E")
+    ]
 
-    assert sampled == {False, True}
-    assert dataset._sample_doubled_word_gaps(
+    assert 1 in sampled
+    assert set(range(2, 21)).issubset(sampled)
+    assert all(1 <= multiplier <= 20 for multiplier in sampled)
+    assert dataset._sample_word_gap_multipliers(
         7, "E E"
-    ) == dataset._sample_doubled_word_gaps(7, "E E")
+    ) == dataset._sample_word_gap_multipliers(7, "E E")
+
+
+def test_render_exposes_the_exact_sequence_returned_to_the_trainer() -> None:
+    dataset = CleanAudioMorseDataset(10, seed=123)
+
+    rendered = dataset.render(7)
+    sequence = dataset[7]
+
+    assert rendered.sequence.text == sequence.text
+    assert torch.equal(rendered.sequence.spectrogram, sequence.spectrogram)
+    assert torch.equal(rendered.sequence.targets, sequence.targets)
+    assert torch.equal(rendered.sequence.tone_activity, sequence.tone_activity)
+    assert rendered.waveform.ndim == 1
+    assert rendered.parameters["index"] == 7
 
 
 def test_noise_only_samples_default_value() -> None:
@@ -253,41 +269,65 @@ def test_noise_only_samples_default_value() -> None:
     assert 0.19 <= ratio <= 0.21
 
 
-def test_noise_only_filters_use_expected_reproducible_proportions() -> None:
+def test_input_filters_use_expected_reproducible_proportions() -> None:
     dataset = CleanAudioMorseDataset(1, seed=41)
 
     sample_count = 10_000
     filters = [
-        dataset._sample_noise_only_filter(index)
+        dataset._sample_input_filter(index)
         for index in range(sample_count)
     ]
-    kinds = [noise_filter.kind for noise_filter in filters]
+    kinds = [input_filter.kind for input_filter in filters if input_filter is not None]
 
-    assert 0.48 <= kinds.count("none") / sample_count <= 0.52
-    assert 0.23 <= kinds.count("lowpass") / sample_count <= 0.27
-    assert 0.23 <= kinds.count("bandpass") / sample_count <= 0.27
+    assert 0.48 <= kinds.count("lowpass") / sample_count <= 0.52
+    assert 0.48 <= kinds.count("bandpass") / sample_count <= 0.52
     assert filters == [
-        dataset._sample_noise_only_filter(index)
+        dataset._sample_input_filter(index)
         for index in range(sample_count)
     ]
     assert all(
-        noise_filter.order in {2, 4}
-        for noise_filter in filters
-        if noise_filter.kind != "none"
+        input_filter is not None and input_filter.order in {2, 4}
+        for input_filter in filters
     )
     assert all(
-        noise_filter.low_cutoff_hz is None
-        and noise_filter.high_cutoff_hz is not None
-        for noise_filter in filters
-        if noise_filter.kind == "lowpass"
+        input_filter is not None
+        and input_filter.low_cutoff_hz is None
+        and input_filter.high_cutoff_hz is not None
+        and input_filter.high_cutoff_hz >= dataset._sample_frequency(index) + 100.0
+        for index, input_filter in enumerate(filters)
+        if input_filter is not None and input_filter.kind == "lowpass"
     )
     assert all(
-        noise_filter.low_cutoff_hz is not None
-        and noise_filter.high_cutoff_hz is not None
-        and noise_filter.low_cutoff_hz < noise_filter.high_cutoff_hz
-        for noise_filter in filters
-        if noise_filter.kind == "bandpass"
+        input_filter is not None
+        and input_filter.low_cutoff_hz is not None
+        and input_filter.high_cutoff_hz is not None
+        and 100.0
+        <= input_filter.high_cutoff_hz - input_filter.low_cutoff_hz
+        <= 1_000.0
+        and input_filter.low_cutoff_hz
+        <= dataset._sample_frequency(index)
+        <= input_filter.high_cutoff_hz
+        for index, input_filter in enumerate(filters)
+        if input_filter is not None and input_filter.kind == "bandpass"
     )
+
+
+def test_input_filter_is_applied_to_morse_samples_and_can_be_disabled() -> None:
+    filtered = CleanAudioMorseDataset(
+        1,
+        Stage1DatasetConfig(apply_input_filter=True),
+        seed=41,
+        texts=["SOS"],
+    )[0]
+    unfiltered = CleanAudioMorseDataset(
+        1,
+        Stage1DatasetConfig(apply_input_filter=False),
+        seed=41,
+        texts=["SOS"],
+    )[0]
+
+    assert torch.equal(filtered.targets, unfiltered.targets)
+    assert not torch.equal(filtered.spectrogram, unfiltered.spectrogram)
 
 
 def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:

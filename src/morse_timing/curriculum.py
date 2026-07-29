@@ -145,6 +145,7 @@ def _training_command(
     target_exact_text: float | None = None,
     target_epochs: int = 2,
     resume: bool = False,
+    apply_input_filter: bool | None = None,
 ) -> list[str]:
     """Build one isolated training command for a curriculum range."""
 
@@ -165,7 +166,7 @@ def _training_command(
         "--num-workers",
         str(training.get("num_workers", 0)),
         "--regenerate-every",
-        str(training.get("regenerate_every", 5)),
+        str(training.get("regenerate_every", 10)),
         "--perfect-epochs",
         str(training.get("perfect_epochs", 5)),
         "--device",
@@ -176,6 +177,14 @@ def _training_command(
             raise ValueError("Cannot resume without a checkpoint")
     else:
         command.extend(("--resume" if resume else "--init-from", str(checkpoint)))
+    selected_input_filter = (
+        checkpoint is not None
+        if apply_input_filter is None
+        else apply_input_filter
+    )
+    command.append(
+        "--input-filter" if selected_input_filter else "--no-input-filter"
+    )
     command.extend(("--output", str(output)))
     command.extend(_range_options(ranges))
     if "learning_rate" in training:
@@ -383,7 +392,7 @@ def _run_adaptive_plan(
     """Expand one random range after validation reaches the configured threshold."""
 
     adaptive = dict(plan["adaptive"])
-    threshold = float(adaptive.get("exact_text_threshold", 0.9))
+    threshold = float(adaptive.get("exact_text_threshold", 0.95))
     target_epochs = int(adaptive.get("required_epochs", 2))
     max_epochs_per_dimension = int(adaptive.get("max_epochs_per_dimension", 50))
     configured_selection_seed = int(
@@ -506,6 +515,7 @@ def _run_adaptive_plan(
                 threshold,
                 target_epochs,
                 resume=resume_training,
+                apply_input_filter=completed_stages > 0,
             ),
             check=True,
         )

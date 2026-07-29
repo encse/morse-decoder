@@ -92,6 +92,7 @@ def test_adaptive_stage_restarts_learning_rate_and_sets_accuracy_target() -> Non
     assert command[command.index("--target-exact-text") + 1] == "0.9"
     assert command[command.index("--target-epochs") + 1] == "2"
     assert command[command.index("--noise-only-probability") + 1] == "0.2"
+    assert "--input-filter" in command
 
 
 def test_initial_stage_creates_a_new_model_with_the_same_loss() -> None:
@@ -106,6 +107,7 @@ def test_initial_stage_creates_a_new_model_with_the_same_loss() -> None:
 
     assert "--resume" not in command
     assert "--init-from" not in command
+    assert "--no-input-filter" in command
     assert "--tone-activity-loss-weight" not in command
     assert TONE_ACTIVITY_LOSS_WEIGHT == 0.3
 
@@ -173,6 +175,7 @@ def test_first_curriculum_stage_builds_the_model_from_scratch(
     assert len(commands) == 1
     assert "--resume" not in commands[0]
     assert "--init-from" not in commands[0]
+    assert "--no-input-filter" in commands[0]
     assert commands[0][commands[0].index("--min-wpm") + 1] == "25.0"
     assert commands[0][commands[0].index("--max-wpm") + 1] == "25.0"
     assert named_checkpoint.read_bytes() == b"center-model"
@@ -230,6 +233,22 @@ def test_adaptive_stage_can_resume_without_resetting_its_epoch_counter() -> None
     )
 
     assert "--resume" in command
+    assert "--input-filter" in command
+
+
+def test_resumed_first_curriculum_stage_stays_unfiltered() -> None:
+    command = _training_command(
+        {},
+        Path("working.last.pt"),
+        Path("working.pt"),
+        {"wpm": (25, 25)},
+        "cpu",
+        resume=True,
+        apply_input_filter=False,
+    )
+
+    assert "--resume" in command
+    assert "--no-input-filter" in command
     assert "--init-from" not in command
 
 
