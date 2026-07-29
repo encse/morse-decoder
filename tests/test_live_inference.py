@@ -44,3 +44,19 @@ def test_incremental_parser_shows_invalid_morse_without_a_label() -> None:
     tokens = (AudioToken.DIT,) * 6 + (AudioToken.END_CHARACTER,)
 
     assert parser.process(tokens) == "[......]"
+
+
+def test_incremental_parser_decodes_bk_prosign_as_one_group() -> None:
+    parser = IncrementalMorseParser()
+    tokens = (
+        AudioToken.DAH,
+        AudioToken.DIT,
+        AudioToken.DIT,
+        AudioToken.DIT,
+        AudioToken.DAH,
+        AudioToken.DIT,
+        AudioToken.DAH,
+        AudioToken.END_CHARACTER,
+    )
+
+    assert parser.process(tokens) == "<BK>"

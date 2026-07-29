@@ -61,7 +61,14 @@ MORSE_TABLE: dict[str, str] = {
     "$": "...-..-",
     "@": ".--.-.",
 }
+MORSE_PROSIGNS: dict[str, str] = {
+    "BK": "-...-.-",
+    "CQ": "-.-.--.-",
+}
 REVERSE_MORSE_TABLE = {value: key for key, value in MORSE_TABLE.items()}
+REVERSE_MORSE_PROSIGNS = {
+    value: f"<{name}>" for name, value in MORSE_PROSIGNS.items()
+}
 SUPPORTED_CHARACTERS = tuple(MORSE_TABLE)
 
 
@@ -112,7 +119,10 @@ def decode_morse(morse: str) -> DecodeResult:
             decoded_characters.append("[]")
         else:
             for code in encoded_word.split():
-                character = REVERSE_MORSE_TABLE.get(code)
+                character = REVERSE_MORSE_PROSIGNS.get(
+                    code,
+                    REVERSE_MORSE_TABLE.get(code),
+                )
                 if character is None:
                     invalid_codes.append(code)
                     decoded_characters.append(f"[{code}]")
