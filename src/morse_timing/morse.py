@@ -62,13 +62,28 @@ MORSE_TABLE: dict[str, str] = {
     "@": ".--.-.",
 }
 MORSE_PROSIGNS: dict[str, str] = {
-    "BK": "-...-.-",
-    "CQ": "-.-.--.-",
+    "AA": ".-.-",  # new line
+    "AR": ".-.-.", # Message separator
+    "AS": ".-...", # wait
+    "BT": "-...-", # new section
+    "CT": "-.-.-", # start of new transmission
+    "HH": "......", # correction
+    "¿": "..-.-",
+    "KA": "-.-.-",
+    "KN": "-.--.",
+    "NJ": "-..---",
+    "SK": "...-.-", # out
+    "SN": "...-.",
+    "SOS": "...---...",
+    "DDD": "-..-..-..",
+    "VE": "...-.",
 }
 REVERSE_MORSE_TABLE = {value: key for key, value in MORSE_TABLE.items()}
 REVERSE_MORSE_PROSIGNS = {
     value: f"<{name}>" for name, value in MORSE_PROSIGNS.items()
 }
+# Prosigns intentionally override regular characters if their Morse codes collide.
+MORSE_DECODING_TABLE = REVERSE_MORSE_TABLE | REVERSE_MORSE_PROSIGNS
 SUPPORTED_CHARACTERS = tuple(MORSE_TABLE)
 
 
@@ -119,10 +134,7 @@ def decode_morse(morse: str) -> DecodeResult:
             decoded_characters.append("[]")
         else:
             for code in encoded_word.split():
-                character = REVERSE_MORSE_PROSIGNS.get(
-                    code,
-                    REVERSE_MORSE_TABLE.get(code),
-                )
+                character = MORSE_DECODING_TABLE.get(code)
                 if character is None:
                     invalid_codes.append(code)
                     decoded_characters.append(f"[{code}]")

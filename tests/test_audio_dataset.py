@@ -15,7 +15,13 @@ from morse_timing.audio_tokens import (
     normalize_audio_tokens,
     text_to_audio_tokens,
 )
-from morse_timing.morse import MORSE_PROSIGNS, SUPPORTED_CHARACTERS, decode_morse
+from morse_timing.morse import (
+    MORSE_DECODING_TABLE,
+    MORSE_PROSIGNS,
+    REVERSE_MORSE_PROSIGNS,
+    SUPPORTED_CHARACTERS,
+    decode_morse,
+)
 
 
 def test_text_tokens_round_trip_through_deterministic_parser() -> None:
@@ -38,11 +44,11 @@ def test_text_tokens_round_trip_through_deterministic_parser() -> None:
 
 
 def test_invalid_morse_is_shown_without_an_invalid_label() -> None:
-    result = decode_morse("......")
+    result = decode_morse(".......")
 
-    assert result.text == "[......]"
+    assert result.text == "[.......]"
     assert not result.is_valid
-    assert result.invalid_codes == ("......",)
+    assert result.invalid_codes == (".......",)
 
 
 def test_prosign_is_decoded_without_extending_the_training_alphabet() -> None:
@@ -52,14 +58,13 @@ def test_prosign_is_decoded_without_extending_the_training_alphabet() -> None:
         AudioToken.DIT,
         AudioToken.DIT,
         AudioToken.DAH,
-        AudioToken.DIT,
-        AudioToken.DAH,
         AudioToken.END_CHARACTER,
     )
 
-    assert MORSE_PROSIGNS["BK"] == "-...-.-"
-    assert "BK" not in SUPPORTED_CHARACTERS
-    assert decode_audio_tokens(tokens).text == "<BK>"
+    assert MORSE_PROSIGNS["BT"] == "-...-"
+    assert MORSE_DECODING_TABLE["-...-"] == REVERSE_MORSE_PROSIGNS["-...-"]
+    assert "BT" not in SUPPORTED_CHARACTERS
+    assert decode_audio_tokens(tokens).text == "<BT>"
 
 
 def test_malformed_token_boundaries_still_show_the_morse_symbols() -> None:

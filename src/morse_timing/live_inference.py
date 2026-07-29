@@ -13,7 +13,7 @@ import torch
 from morse_timing.audio_dataset import prepare_spectrogram_features
 from morse_timing.audio_inference import MorseAudioDecoder
 from morse_timing.audio_tokens import AudioToken
-from morse_timing.morse import REVERSE_MORSE_PROSIGNS, REVERSE_MORSE_TABLE
+from morse_timing.morse import MORSE_DECODING_TABLE
 from morse_timing.spectrogram import compute_log_magnitude_stft
 
 
@@ -112,10 +112,7 @@ class IncrementalMorseParser:
             return ""
         morse = "".join(self.symbols)
         self.symbols.clear()
-        return REVERSE_MORSE_PROSIGNS.get(
-            morse,
-            REVERSE_MORSE_TABLE.get(morse, f"[{morse}]"),
-        )
+        return MORSE_DECODING_TABLE.get(morse, f"[{morse}]")
 
 
 def _load_sounddevice():
