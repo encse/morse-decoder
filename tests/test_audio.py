@@ -40,6 +40,13 @@ def test_radio_noise_filter_shapes_spectrum_and_preserves_rms() -> None:
         high_cutoff_hz=1_000.0,
         order=4,
     )
+    repeated = apply_radio_noise_filter(
+        samples,
+        8_000,
+        low_cutoff_hz=500.0,
+        high_cutoff_hz=1_000.0,
+        order=4,
+    )
     frequencies = np.fft.rfftfreq(filtered.size, d=1.0 / 8_000)
     power = np.abs(np.fft.rfft(filtered)) ** 2
     passband_power = power[
@@ -49,6 +56,8 @@ def test_radio_noise_filter_shapes_spectrum_and_preserves_rms() -> None:
         (frequencies >= 2_000.0) & (frequencies <= 3_000.0)
     ].mean()
 
+    assert filtered.shape == samples.shape
+    assert np.array_equal(filtered, repeated)
     assert float(filtered.std()) == pytest.approx(float(samples.std()), rel=0.001)
     assert rejected_power < passband_power * 0.005
 

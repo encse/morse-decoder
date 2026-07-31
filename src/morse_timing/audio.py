@@ -377,7 +377,12 @@ def apply_radio_noise_filter(
     if samples.size == 0:
         return samples.copy()
 
-    frequencies = np.fft.rfftfreq(samples.size, d=1.0 / sample_rate)
+    # PocketFFT is dramatically slower for the arbitrary, often prime-ish
+    # recording lengths produced by randomized Morse timing. Zero-padding to a
+    # radix-2 length keeps the same frequency-domain filter while avoiding
+    # pathological FFT factorizations.
+    fft_size = 1 << (samples.size - 1).bit_length()
+    frequencies = np.fft.rfftfreq(fft_size, d=1.0 / sample_rate)
     response = np.ones_like(frequencies)
     if low_cutoff_hz is not None:
         response[0] = 0.0
@@ -388,10 +393,11 @@ def apply_radio_noise_filter(
         response /= np.sqrt(
             1.0 + (frequencies / high_cutoff_hz) ** (2 * order)
         )
+    response = response.astype(samples.dtype, copy=False)
 
     source_rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
-    spectrum = np.fft.rfft(samples)
-    filtered = np.fft.irfft(spectrum * response, n=samples.size)
+    spectrum = np.fft.rfft(samples, n=fft_size)
+    filtered = np.fft.irfft(spectrum * response, n=fft_size)[: samples.size]
     filtered_rms = float(np.sqrt(np.mean(filtered**2)))
     if source_rms > 0.0 and filtered_rms > 0.0:
         filtered *= source_rms / filtered_rms
