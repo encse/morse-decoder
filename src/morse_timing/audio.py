@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,11 +37,74 @@ class AudioConfig:
 
 
 @dataclass(frozen=True)
+class GapTimingConfig:
+    """Disjoint timing bands for the three semantic Morse silence classes."""
+
+    min_intra_character_units: float = 0.5
+    max_intra_character_units: float = 1.5
+    min_character_units: float = 2.0
+    max_character_units: float = 4.5
+    min_word_units: float = 5.5
+    max_word_units: float = 9.0
+    character_extreme_probability: float = 0.6
+    character_extreme_width_units: float = 0.3
+
+    def __post_init__(self) -> None:
+        values = (
+            self.min_intra_character_units,
+            self.max_intra_character_units,
+            self.min_character_units,
+            self.max_character_units,
+            self.min_word_units,
+            self.max_word_units,
+            self.character_extreme_width_units,
+        )
+        if not all(np.isfinite(value) for value in values):
+            raise ValueError("Gap timing values must be finite")
+        if not (
+            0.0 < self.min_intra_character_units
+            <= self.max_intra_character_units
+            < self.min_character_units
+            <= self.max_character_units
+            < self.min_word_units
+            <= self.max_word_units
+        ):
+            raise ValueError("Morse gap timing bands must be positive and disjoint")
+        if not 0.0 <= self.character_extreme_probability <= 1.0:
+            raise ValueError("Character-gap extreme probability must be between 0 and 1")
+        character_width = self.max_character_units - self.min_character_units
+        if (
+            self.character_extreme_width_units < 0.0
+            or self.character_extreme_width_units > character_width / 2.0
+            or (
+                character_width > 0.0
+                and self.character_extreme_width_units == 0.0
+            )
+        ):
+            raise ValueError(
+                "Character-gap extreme width must fit twice inside its timing band"
+            )
+
+
+IDEAL_GAP_TIMING = GapTimingConfig(
+    min_intra_character_units=1.0,
+    max_intra_character_units=1.0,
+    min_character_units=3.0,
+    max_character_units=3.0,
+    min_word_units=7.0,
+    max_word_units=7.0,
+    character_extreme_probability=0.0,
+    character_extreme_width_units=0.0,
+)
+
+
+@dataclass(frozen=True)
 class AudioSegment:
     """One ideal tone or silence segment measured in Morse timing units."""
 
     is_tone: bool
     units: int
+    gap_type: Literal["intra_character", "character", "word"] | None = None
 
 
 @dataclass(frozen=True)
@@ -84,18 +148,29 @@ def text_to_segments(
             for symbol_index, symbol in enumerate(symbols):
                 segments.append(AudioSegment(is_tone=True, units=1 if symbol == "." else 3))
                 if symbol_index < len(symbols) - 1:
-                    segments.append(AudioSegment(is_tone=False, units=1))
+                    segments.append(
+                        AudioSegment(
+                            is_tone=False,
+                            units=1,
+                            gap_type="intra_character",
+                        )
+                    )
             if character_index < len(word) - 1:
-                segments.append(AudioSegment(is_tone=False, units=3))
+                segments.append(
+                    AudioSegment(is_tone=False, units=3, gap_type="character")
+                )
             elif word_index < len(words) - 1:
                 segments.append(
                     AudioSegment(
                         is_tone=False,
                         units=7 * selected_gaps[word_index],
+                        gap_type="word",
                     )
                 )
             else:
-                segments.append(AudioSegment(is_tone=False, units=3))
+                segments.append(
+                    AudioSegment(is_tone=False, units=3, gap_type="character")
+                )
     return tuple(segments)
 
 
@@ -108,6 +183,7 @@ def synthesize_morse(
     rng: np.random.Generator | None = None,
     carrier_phase_radians: float | None = None,
     word_gap_multipliers: Sequence[int] | None = None,
+    gap_timing: GapTimingConfig | None = None,
 ) -> NDArray[np.float32]:
     """Synthesize clean Morse audio using the standard 1.2/WPM dit duration."""
 
@@ -119,6 +195,7 @@ def synthesize_morse(
         rng=rng,
         carrier_phase_radians=carrier_phase_radians,
         word_gap_multipliers=word_gap_multipliers,
+        gap_timing=gap_timing,
     )
     return waveform
 
@@ -132,6 +209,7 @@ def synthesize_morse_with_timing(
     rng: np.random.Generator | None = None,
     carrier_phase_radians: float | None = None,
     word_gap_multipliers: Sequence[int] | None = None,
+    gap_timing: GapTimingConfig | None = None,
 ) -> tuple[NDArray[np.float32], tuple[RenderedSegment, ...]]:
     """Synthesize Morse and return exact boundaries for supervised events."""
 
@@ -154,16 +232,54 @@ def synthesize_morse_with_timing(
     sample_offset = 0
     base_samples = unit_seconds * selected_config.sample_rate
 
-    def dot_samples(multiplier: int = 1) -> int:
+    def dot_samples(multiplier: float = 1.0, *, apply_jitter: bool = True) -> int:
         scale = (
             float(np.clip(selected_rng.normal(1.0, timing_jitter), 0.5, 2.0))
-            if timing_jitter > 0.0
+            if apply_jitter and timing_jitter > 0.0
             else 1.0
         )
         return max(1, round(multiplier * base_samples * scale))
 
+    def character_gap_units(config: GapTimingConfig) -> float:
+        minimum = config.min_character_units
+        maximum = config.max_character_units
+        edge_width = config.character_extreme_width_units
+        if selected_rng.random() < config.character_extreme_probability:
+            if selected_rng.random() < 0.5:
+                return float(selected_rng.uniform(minimum, minimum + edge_width))
+            return float(selected_rng.uniform(maximum - edge_width, maximum))
+        return float(selected_rng.uniform(minimum + edge_width, maximum - edge_width))
+
+    def gap_units(segment: AudioSegment, config: GapTimingConfig) -> float:
+        if segment.gap_type == "intra_character":
+            scale = (
+                float(selected_rng.normal(1.0, timing_jitter))
+                if timing_jitter > 0.0
+                else 1.0
+            )
+            return float(
+                np.clip(
+                    scale,
+                    config.min_intra_character_units,
+                    config.max_intra_character_units,
+                )
+            )
+        if segment.gap_type == "character":
+            return character_gap_units(config)
+        if segment.gap_type == "word":
+            multiplier = segment.units / 7.0
+            return float(
+                selected_rng.uniform(config.min_word_units, config.max_word_units)
+                * multiplier
+            )
+        raise ValueError("Every silence segment must identify its Morse gap type")
+
     for segment in text_to_segments(text, word_gap_multipliers):
-        sample_count = dot_samples(segment.units)
+        sample_count = (
+            dot_samples(segment.units)
+            if segment.is_tone or gap_timing is None
+            else dot_samples(gap_units(segment, gap_timing), apply_jitter=False)
+        )
         if segment.is_tone:
             chunks.append(
                 _tone(

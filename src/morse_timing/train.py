@@ -258,6 +258,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-frequency", type=float)
     parser.add_argument("--frequency", type=float)
     parser.add_argument("--timing-jitter", type=float)
+    parser.add_argument("--min-intra-character-gap-units", type=float)
+    parser.add_argument("--max-intra-character-gap-units", type=float)
+    parser.add_argument("--min-character-gap-units", type=float)
+    parser.add_argument("--max-character-gap-units", type=float)
+    parser.add_argument("--min-word-gap-units", type=float)
+    parser.add_argument("--max-word-gap-units", type=float)
+    parser.add_argument("--character-gap-extreme-probability", type=float)
+    parser.add_argument("--character-gap-extreme-width-units", type=float)
     parser.add_argument("--noise-percent", type=float)
     parser.add_argument("--noise-power", type=float)
     parser.add_argument("--min-amplitude-percent", type=float)
@@ -420,6 +428,29 @@ def main(argv: list[str] | None = None) -> None:
     )
     if args.timing_jitter is not None:
         dataset_config = replace(dataset_config, timing_jitter=args.timing_jitter)
+    gap_timing_overrides = {
+        key: value
+        for key, value in {
+            "min_intra_character_units": args.min_intra_character_gap_units,
+            "max_intra_character_units": args.max_intra_character_gap_units,
+            "min_character_units": args.min_character_gap_units,
+            "max_character_units": args.max_character_gap_units,
+            "min_word_units": args.min_word_gap_units,
+            "max_word_units": args.max_word_gap_units,
+            "character_extreme_probability": (
+                args.character_gap_extreme_probability
+            ),
+            "character_extreme_width_units": (
+                args.character_gap_extreme_width_units
+            ),
+        }.items()
+        if value is not None
+    }
+    if gap_timing_overrides:
+        dataset_config = replace(
+            dataset_config,
+            gap_timing=replace(dataset_config.gap_timing, **gap_timing_overrides),
+        )
     if args.noise_percent is not None:
         dataset_config = replace(
             dataset_config,

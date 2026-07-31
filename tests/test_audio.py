@@ -6,6 +6,7 @@ import pytest
 
 from morse_timing.audio import (
     AudioConfig,
+    GapTimingConfig,
     add_power_scaled_noise,
     apply_radio_noise_filter,
     apply_recording_amplitude,
@@ -13,6 +14,7 @@ from morse_timing.audio import (
     add_white_noise,
     save_wav,
     synthesize_morse,
+    synthesize_morse_with_timing,
     text_to_segments,
 )
 
@@ -84,6 +86,60 @@ def test_text_to_segments_uses_ideal_morse_ratios() -> None:
         (True, 1),
         (False, 3),
     ]
+
+
+def test_sampled_gap_classes_are_disjoint_and_cover_character_extremes() -> None:
+    timing = GapTimingConfig()
+    units_by_type: dict[str, list[float]] = {
+        "intra_character": [],
+        "character": [],
+        "word": [],
+    }
+    samples_per_unit = 1.2 / 20.0 * 8_000
+
+    for seed in range(200):
+        _, segments = synthesize_morse_with_timing(
+            "SOS E",
+            20.0,
+            timing_jitter=0.5,
+            rng=np.random.default_rng(seed),
+            gap_timing=timing,
+        )
+        for rendered in segments:
+            if rendered.segment.gap_type is not None:
+                units_by_type[rendered.segment.gap_type].append(
+                    (rendered.end_sample - rendered.start_sample) / samples_per_unit
+                )
+
+    rounding_tolerance = 0.5 / samples_per_unit
+    assert min(units_by_type["intra_character"]) >= (
+        timing.min_intra_character_units - rounding_tolerance
+    )
+    assert max(units_by_type["intra_character"]) <= (
+        timing.max_intra_character_units + rounding_tolerance
+    )
+    assert min(units_by_type["character"]) >= (
+        timing.min_character_units - rounding_tolerance
+    )
+    assert max(units_by_type["character"]) <= (
+        timing.max_character_units + rounding_tolerance
+    )
+    assert min(units_by_type["word"]) >= (
+        timing.min_word_units - rounding_tolerance
+    )
+    assert max(units_by_type["word"]) <= (
+        timing.max_word_units + rounding_tolerance
+    )
+    assert sum(value <= 2.3 for value in units_by_type["character"]) > 100
+    assert sum(value >= 4.2 for value in units_by_type["character"]) > 100
+
+
+def test_gap_timing_rejects_overlapping_bands() -> None:
+    with pytest.raises(ValueError, match="disjoint"):
+        GapTimingConfig(
+            max_intra_character_units=2.0,
+            min_character_units=2.0,
+        )
 
 
 def test_existing_word_gap_can_be_extended_by_a_selected_multiplier() -> None:

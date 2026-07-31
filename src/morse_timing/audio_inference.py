@@ -13,6 +13,7 @@ import torch
 from torch.nn import functional as F
 
 from morse_timing.audio import (
+    IDEAL_GAP_TIMING,
     AudioConfig,
     RenderedSegment,
     add_power_scaled_noise,
@@ -376,6 +377,9 @@ class MorseAudioDecoder:
             )
         config = replace(
             config,
+            gap_timing=(
+                config.gap_timing if profile == "random" else IDEAL_GAP_TIMING
+            ),
             timing_jitter=(
                 config.timing_jitter
                 if profile == "random" and timing_jitter is None
@@ -654,6 +658,7 @@ class MorseAudioDecoder:
                 config.audio,
                 timing_jitter=config.timing_jitter,
                 rng=timing_rng,
+                gap_timing=config.gap_timing,
             )
             waveform_chunks.append(repetition_waveform)
             shifted_segments.extend(

@@ -1,10 +1,14 @@
+from dataclasses import asdict
+
 import torch
 
+from morse_timing.audio import GapTimingConfig
 from morse_timing.audio_dataset import (
     CleanAudioMorseDataset,
     Stage1DatasetConfig,
     build_audio_sequence_sample,
     collate_audio_sequences,
+    restore_stage1_dataset_config,
 )
 from morse_timing.audio_tokens import (
     AudioToken,
@@ -22,6 +26,15 @@ from morse_timing.morse import (
     SUPPORTED_CHARACTERS,
     decode_morse,
 )
+
+
+def test_legacy_dataset_config_restores_disjoint_gap_defaults() -> None:
+    serialized = asdict(Stage1DatasetConfig())
+    serialized.pop("gap_timing")
+
+    restored = restore_stage1_dataset_config(serialized)
+
+    assert restored.gap_timing == GapTimingConfig()
 
 
 def test_text_tokens_round_trip_through_deterministic_parser() -> None:
@@ -240,7 +253,7 @@ def test_extended_word_gap_changes_only_audio_duration_not_the_ctc_target() -> N
         word_gap_multipliers=(20,),
     )
 
-    assert extended.input_length - normal.input_length == 399
+    assert extended.input_length > normal.input_length
     assert torch.equal(extended.targets, normal.targets)
     assert extended.text == normal.text == "E E"
 

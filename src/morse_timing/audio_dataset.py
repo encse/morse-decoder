@@ -15,6 +15,7 @@ from torch.utils.data import Dataset
 
 from morse_timing.audio import (
     AudioConfig,
+    GapTimingConfig,
     RenderedSegment,
     add_power_scaled_noise,
     add_white_noise,
@@ -66,6 +67,7 @@ class Stage1DatasetConfig:
     min_noise_only_power: float = 1.0
     apply_input_filter: bool = True
     audio: AudioConfig = AudioConfig()
+    gap_timing: GapTimingConfig = GapTimingConfig()
     spectrogram: SpectrogramConfig = SpectrogramConfig()
 
     def __post_init__(self) -> None:
@@ -629,6 +631,7 @@ def render_audio_sequence_sample(
         timing_jitter=selected_config.timing_jitter,
         rng=np.random.default_rng(timing_seed),
         word_gap_multipliers=word_gap_multipliers,
+        gap_timing=selected_config.gap_timing,
     )
     leading_samples = round(
         selected_config.leading_silence_seconds * audio_config.sample_rate
@@ -849,6 +852,7 @@ def restore_stage1_dataset_config(values: dict[str, Any]) -> Stage1DatasetConfig
         restored["min_amplitude_percent"] = 100.0
         restored["max_amplitude_percent"] = 100.0
     restored["audio"] = AudioConfig(**restored["audio"])
+    restored["gap_timing"] = GapTimingConfig(**restored.get("gap_timing", {}))
     spectrogram = dict(restored["spectrogram"])
     if "scale" not in spectrogram:
         spectrogram["scale"] = "log_magnitude"

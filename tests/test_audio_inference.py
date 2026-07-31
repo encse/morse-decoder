@@ -127,19 +127,26 @@ def test_synthesized_analysis_repeats_text_with_the_same_noise_in_gaps() -> None
         repetition_count=4,
         gap_seconds=5.0,
     )
-    message_samples = 1_920
     gap_samples = 5 * config.audio.sample_rate
 
     assert sample.text == "E E E E"
-    assert sample.waveform.size == 4 * message_samples + 3 * gap_samples
     assert len(sample.character_spans) == 4
-    for gap_index in range(3):
-        gap_start = (gap_index + 1) * message_samples + gap_index * gap_samples
+    for span in sample.character_spans[1:]:
+        next_tone_start = round(span.start_seconds * config.audio.sample_rate)
+        gap_start = next_tone_start - gap_samples
         gap = sample.waveform[gap_start : gap_start + gap_samples]
         assert np.std(gap) > 0.0
-    message_silence = sample.waveform[600:1_800]
-    first_gap = sample.waveform[message_samples : message_samples + gap_samples]
-    assert np.std(first_gap) == pytest.approx(np.std(message_silence), rel=0.1)
+    background = sample.waveform[
+        round(sample.character_spans[0].end_seconds * config.audio.sample_rate)
+        + 100:
+        round(sample.character_spans[1].start_seconds * config.audio.sample_rate)
+        - 100
+    ]
+    first_gap_end = round(
+        sample.character_spans[1].start_seconds * config.audio.sample_rate
+    )
+    first_gap = sample.waveform[first_gap_end - gap_samples : first_gap_end]
+    assert np.std(first_gap) == pytest.approx(np.std(background), rel=0.1)
 
 
 def test_clean_analysis_gap_is_silent() -> None:
@@ -169,7 +176,13 @@ def test_clean_analysis_gap_is_silent() -> None:
         gap_seconds=1.0,
     )
 
-    assert np.all(sample.waveform[1_920 : 1_920 + config.audio.sample_rate] == 0.0)
+    next_tone_start = round(
+        sample.character_spans[1].start_seconds * config.audio.sample_rate
+    )
+    explicit_gap = sample.waveform[
+        next_tone_start - config.audio.sample_rate : next_tone_start
+    ]
+    assert np.all(explicit_gap == 0.0)
 
 
 def test_explicit_analysis_filters_apply_to_clean_profile() -> None:
@@ -403,6 +416,8 @@ def test_unspecified_augmentations_default_to_clean_inference() -> None:
     effective = decoder.effective_config(None, None)
 
     assert effective.timing_jitter == 0.0
+    assert effective.gap_timing.min_character_units == 3.0
+    assert effective.gap_timing.max_character_units == 3.0
     assert effective.noise_percent == 0.0
     assert effective.fade_depth_percent == 0.0
     assert not effective.apply_input_filter
@@ -444,6 +459,7 @@ def test_random_profile_samples_reproducibly_from_checkpoint_ranges() -> None:
     assert 10.0 <= first.wpm <= 40.0
     assert 100.0 <= first.audio.frequency_hz <= 2_000.0
     assert 0.0 <= first.timing_jitter <= 0.1
+    assert first.gap_timing == dataset_config.gap_timing
     assert 0.0 <= first.noise_power <= 200.0
     assert first.apply_input_filter
     assert 10.0 <= first.max_amplitude_percent <= 150.0

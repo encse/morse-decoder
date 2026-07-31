@@ -128,6 +128,22 @@ The configured center values and final limits are:
 | Fade frequency | 0.5 Hz | 0.1–2 Hz |
 | Rise/fall time | 0 ms | 0–10 ms |
 
+Training silence classes use disjoint hard timing bands so that one duration
+never has two boundary labels:
+
+| Silence class | Default range |
+| --- | ---: |
+| Within a character | 0.5–1.5 dit |
+| Between characters | 2.0–4.5 dit |
+| Between words | 5.5–9.0 dit, before extended-space multiplication |
+
+Character gaps deliberately sample 60% of examples from the outer 0.3-dit
+edges of their range, split evenly between short and long extremes. The
+`--min-*-gap-units`, `--max-*-gap-units`,
+`--character-gap-extreme-probability`, and
+`--character-gap-extreme-width-units` training options can override these
+defaults. Configuration validation rejects overlapping timing bands.
+
 Run the plan locally:
 
 ```bash
