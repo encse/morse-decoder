@@ -100,10 +100,17 @@ def format_audio_tokens_as_morse(tokens: Sequence[AudioToken | int]) -> str:
     return " ".join(morse_groups)
 
 
-def decode_audio_tokens(tokens: Sequence[AudioToken | int]) -> DecodeResult:
-    """Convert a collapsed CTC token sequence to decoded text."""
+def decode_audio_tokens(
+    tokens: Sequence[AudioToken | int],
+    *,
+    recognize_prosigns: bool = False,
+) -> DecodeResult:
+    """Convert collapsed CTC tokens, optionally recognizing prosigns."""
 
-    return decode_morse(audio_tokens_to_morse(tokens))
+    return decode_morse(
+        audio_tokens_to_morse(tokens),
+        recognize_prosigns=recognize_prosigns,
+    )
 
 
 def collapse_ctc_path(

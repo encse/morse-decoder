@@ -65,6 +65,7 @@ MORSE_PROSIGNS: dict[str, str] = {
     "AA": ".-.-",  # new line
     "AR": ".-.-.", # Message separator
     "AS": ".-...", # wait
+    "BK": "-...-.-",
     "BT": "-...-", # new section
     "CT": "-.-.-", # start of new transmission
     "HH": "......", # correction
@@ -118,8 +119,12 @@ def encode_text(text: str) -> str:
     )
 
 
-def decode_morse(morse: str) -> DecodeResult:
-    """Decode Morse and show unrecognized groups as their original symbols."""
+def decode_morse(
+    morse: str,
+    *,
+    recognize_prosigns: bool = False,
+) -> DecodeResult:
+    """Decode Morse, optionally applying inference-only prosign precedence."""
 
     stripped = morse.strip()
     if not stripped:
@@ -127,6 +132,9 @@ def decode_morse(morse: str) -> DecodeResult:
 
     decoded_words: list[str] = []
     invalid_codes: list[str] = []
+    decoding_table = (
+        MORSE_DECODING_TABLE if recognize_prosigns else REVERSE_MORSE_TABLE
+    )
     for encoded_word in (part.strip() for part in stripped.split("/")):
         decoded_characters: list[str] = []
         if not encoded_word:
@@ -134,7 +142,7 @@ def decode_morse(morse: str) -> DecodeResult:
             decoded_characters.append("[]")
         else:
             for code in encoded_word.split():
-                character = MORSE_DECODING_TABLE.get(code)
+                character = decoding_table.get(code)
                 if character is None:
                     invalid_codes.append(code)
                     decoded_characters.append(f"[{code}]")

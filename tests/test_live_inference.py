@@ -54,7 +54,9 @@ def test_incremental_parser_decodes_bk_prosign_as_one_group() -> None:
         AudioToken.DIT,
         AudioToken.DIT,
         AudioToken.DAH,
+        AudioToken.DIT,
+        AudioToken.DAH,
         AudioToken.END_CHARACTER,
     )
 
-    assert parser.process(tokens) == "<BT>"
+    assert parser.process(tokens) == "<BK>"

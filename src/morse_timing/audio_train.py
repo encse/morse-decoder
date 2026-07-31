@@ -306,7 +306,8 @@ def evaluate_overfit_dataset(
             exact_tokens += int(reference == prediction)
             try:
                 predicted_text = decode_audio_tokens(
-                    normalize_audio_tokens(prediction)
+                    normalize_audio_tokens(prediction),
+                    recognize_prosigns=False,
                 ).text
             except ValueError:
                 morse = format_audio_tokens_as_morse(

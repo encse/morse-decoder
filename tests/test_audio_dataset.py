@@ -77,7 +77,19 @@ def test_prosign_is_decoded_without_extending_the_training_alphabet() -> None:
     assert MORSE_PROSIGNS["BT"] == "-...-"
     assert MORSE_DECODING_TABLE["-...-"] == REVERSE_MORSE_PROSIGNS["-...-"]
     assert "BT" not in SUPPORTED_CHARACTERS
-    assert decode_audio_tokens(tokens).text == "<BT>"
+    assert decode_audio_tokens(tokens, recognize_prosigns=True).text == "<BT>"
+    assert decode_audio_tokens(tokens).text == "="
+
+
+def test_training_decoder_round_trips_the_complete_regular_alphabet() -> None:
+    text = "".join(SUPPORTED_CHARACTERS)
+
+    decoded = decode_audio_tokens(
+        text_to_audio_tokens(text),
+        recognize_prosigns=False,
+    )
+
+    assert decoded.text == text
 
 
 def test_malformed_token_boundaries_still_show_the_morse_symbols() -> None:

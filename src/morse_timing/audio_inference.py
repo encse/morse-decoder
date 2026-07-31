@@ -294,7 +294,10 @@ class MorseAudioDecoder:
         normalized_prediction = normalize_audio_tokens(predicted)
         try:
             morse = audio_tokens_to_morse(normalized_prediction)
-            decoded = decode_audio_tokens(normalized_prediction)
+            decoded = decode_audio_tokens(
+                normalized_prediction,
+                recognize_prosigns=True,
+            )
             return (
                 frame_tokens,
                 predicted,
