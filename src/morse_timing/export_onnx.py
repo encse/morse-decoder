@@ -30,8 +30,8 @@ class StreamingOnnxWrapper(nn.Module):
         features: Tensor,
         hidden_state: Tensor,
         cell_state: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        """Return logits and the state to pass to the next audio chunk."""
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Return logits, carrier frequency, and reusable recurrent state."""
 
         projected = self.model.frame_projection(features)
         encoded, (next_hidden, next_cell) = self.model.sequence_encoder(
@@ -39,7 +39,11 @@ class StreamingOnnxWrapper(nn.Module):
             (hidden_state, cell_state),
         )
         logits = self.model.classify_frames(encoded)
-        return logits, next_hidden, next_cell
+        lengths = torch.full(
+            (encoded.shape[0],), encoded.shape[1], device=encoded.device
+        )
+        frequency_hz = self.model.estimate_frequency(encoded, lengths)
+        return logits, frequency_hz, next_hidden, next_cell
 
 
 def load_wrapper(
@@ -56,7 +60,11 @@ def load_wrapper(
         raise ValueError("Unsupported checkpoint format")
     config = AudioModelConfig(**checkpoint["model_config"])
     model = MorseAudioCTCModel(config)
-    model.load_state_dict(checkpoint["model_state"])
+    incompatible = model.load_state_dict(checkpoint["model_state"], strict=False)
+    if incompatible.unexpected_keys or not set(incompatible.missing_keys).issubset(
+        {"frequency_head.weight", "frequency_head.bias"}
+    ):
+        raise ValueError("Checkpoint model weights are incompatible")
     return StreamingOnnxWrapper(model), checkpoint
 
 
@@ -82,12 +90,18 @@ def export_checkpoint(
             (features, hidden_state, cell_state),
             output_path,
             input_names=("features", "hidden_state", "cell_state"),
-            output_names=("logits", "next_hidden_state", "next_cell_state"),
+            output_names=(
+                "logits",
+                "frequency_hz",
+                "next_hidden_state",
+                "next_cell_state",
+            ),
             dynamic_axes={
                 "features": {0: "batch", 1: "frames"},
                 "hidden_state": {1: "batch"},
                 "cell_state": {1: "batch"},
                 "logits": {0: "batch", 1: "frames"},
+                "frequency_hz": {0: "batch"},
                 "next_hidden_state": {1: "batch"},
                 "next_cell_state": {1: "batch"},
             },
@@ -113,6 +127,7 @@ def export_checkpoint(
         },
         "outputs": {
             "logits": ["batch", "frames", 5],
+            "frequency_hz": ["batch"],
             "next_hidden_state": [
                 config.num_lstm_layers,
                 "batch",

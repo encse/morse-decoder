@@ -37,6 +37,27 @@ def test_completed_curriculum_stage_is_archived_with_ranges(tmp_path: Path) -> N
     assert metadata["curriculum_ranges"] == {"wpm": [14.0, 26.0]}
 
 
+def test_curriculum_target_requires_frequency_accuracy(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "model.pt"
+    metadata_path = checkpoint.with_suffix(".json")
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "experiment": {"curriculum_target_reached": True},
+                "metrics": {"frequency_within_50hz_accuracy": 0.899},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert not curriculum_module._checkpoint_reached_target(checkpoint)
+
+    values = json.loads(metadata_path.read_text(encoding="utf-8"))
+    values["metrics"]["frequency_within_50hz_accuracy"] = 0.9
+    metadata_path.write_text(json.dumps(values), encoding="utf-8")
+    assert curriculum_module._checkpoint_reached_target(checkpoint)
+
+
 def test_completed_stage_summary_is_searchable(capsys) -> None:
     _print_stage_summary(
         4,
@@ -149,7 +170,10 @@ def test_first_curriculum_stage_builds_the_model_from_scratch(
                 {
                     "checkpoint": str(output),
                     "experiment": {"curriculum_target_reached": True},
-                    "metrics": {"exact_text_accuracy": 0.95},
+                    "metrics": {
+                        "exact_text_accuracy": 0.95,
+                        "frequency_within_50hz_accuracy": 0.9,
+                    },
                 }
             ),
             encoding="utf-8",
@@ -200,6 +224,7 @@ def test_reference_wav_result_prints_morse_and_text(
         decoded_text = "SOS"
         valid = True
         duration_seconds = 3.5
+        frequency_hz = 700.0
         error = None
 
     monkeypatch.setattr(
@@ -391,7 +416,12 @@ def test_failed_dimension_is_abandoned_and_next_dimension_starts_from_stable_mod
                     "experiment": {
                         "curriculum_target_reached": len(commands) == 2,
                     },
-                    "metrics": {"exact_text_accuracy": exact_text},
+                    "metrics": {
+                        "exact_text_accuracy": exact_text,
+                        "frequency_within_50hz_accuracy": (
+                            0.9 if len(commands) == 2 else 0.0
+                        ),
+                    },
                 }
             ),
             encoding="utf-8",
