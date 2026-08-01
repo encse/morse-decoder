@@ -41,7 +41,7 @@ text
   -> 20 ms, 65-bin linear-power STFT frames
   -> frequency convolution and dense frame projection
   -> stateful LSTM
-  -> CTC logits
+  -> CTC logits + carrier-frequency estimate
   -> DIT / DAH / character boundary / word boundary
   -> decoded text
 ```
@@ -99,15 +99,18 @@ The complete training configuration is in `curriculum-plan.json`. The first
 stage creates the model from scratch using one exact starting value for every
 dimension and does not apply receiver filtering. Later stages enable receiver
 filtering and widen one randomly selected dimension by one step
-until decoded-text accuracy reaches the configured threshold for the required
-number of epochs. A failed dimension is set aside and another unfinished
-dimension is selected reproducibly.
+until decoded-text accuracy reaches the configured threshold and at least 90%
+of signal-bearing validation samples have a carrier-frequency estimate within
+50 Hz, for the required number of epochs. A failed dimension is set aside and
+another unfinished dimension is selected reproducibly.
 
 Every stage, including the first one, uses the same model architecture and the
-same `CTC + tone activity` training loss. There is no separate base-model
-training phase. Every word, including the final word in a sample, ends with an
-`END_WORD` target. The batch decoder treats the final `END_WORD` as a
-terminator instead of rendering a trailing space.
+same `CTC + tone activity + 0.05 × normalized frequency Smooth L1` training
+loss. Noise-only samples are excluded from frequency regression and frequency
+accuracy. There is no separate base-model training phase. Every word, including
+the final word in a sample, ends with an `END_WORD` target. The batch decoder
+treats the final `END_WORD` as a terminator instead of rendering a trailing
+space.
 
 The optional top-level `reference_wav` path is decoded after every successfully
 completed stage. Its predicted Morse sequence and decoded text are printed for
@@ -374,8 +377,8 @@ python -m morse_timing.export_onnx \
 ```
 
 The ONNX model accepts `features`, `hidden_state`, and `cell_state`, and returns
-`logits`, `next_hidden_state`, and `next_cell_state`. Batch size and chunk
-length are dynamic. Export metadata is written to
+`logits`, `frequency_hz`, `next_hidden_state`, and `next_cell_state`. Batch size
+and chunk length are dynamic. Export metadata is written to
 `models/morse-lstm-curriculum.onnx.json`.
 
 ## Source layout

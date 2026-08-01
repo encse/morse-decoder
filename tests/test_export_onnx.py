@@ -21,9 +21,10 @@ def test_streaming_onnx_wrapper_has_explicit_reusable_state() -> None:
     hidden = torch.zeros(1, 2, 7)
     cell = torch.zeros_like(hidden)
 
-    logits, next_hidden, next_cell = wrapper(features, hidden, cell)
+    logits, frequency_hz, next_hidden, next_cell = wrapper(features, hidden, cell)
 
     assert logits.shape == (2, 9, 5)
+    assert frequency_hz.shape == (2,)
     assert next_hidden.shape == hidden.shape
     assert next_cell.shape == cell.shape
 

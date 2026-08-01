@@ -148,6 +148,7 @@ class AudioSequenceSample:
     targets: Tensor
     tone_activity: Tensor
     text: str
+    frequency_hz: float | None
 
     @property
     def input_length(self) -> int:
@@ -201,6 +202,7 @@ class AudioBatch:
     input_lengths: Tensor
     target_lengths: Tensor
     padding_mask: Tensor
+    frequencies_hz: Tensor
     texts: tuple[str, ...]
 
     def to(self, device: torch.device | str) -> AudioBatch:
@@ -213,6 +215,7 @@ class AudioBatch:
             input_lengths=self.input_lengths.to(device),
             target_lengths=self.target_lengths.to(device),
             padding_mask=self.padding_mask.to(device),
+            frequencies_hz=self.frequencies_hz.to(device),
             texts=self.texts,
         )
 
@@ -715,6 +718,7 @@ def render_audio_sequence_sample(
         targets=targets,
         tone_activity=tone_activity,
         text=normalized_text,
+        frequency_hz=audio_config.frequency_hz,
     )
     return RenderedTrainingSample(
         sequence=sequence,
@@ -806,6 +810,7 @@ def render_noise_only_sequence_sample(
         targets=torch.empty(0, dtype=torch.long),
         tone_activity=torch.zeros(features.shape[0], dtype=torch.float32),
         text="",
+        frequency_hz=None,
     )
     return RenderedTrainingSample(
         sequence=sequence,
@@ -895,5 +900,12 @@ def collate_audio_sequences(samples: Sequence[AudioSequenceSample]) -> AudioBatc
         input_lengths=input_lengths,
         target_lengths=target_lengths,
         padding_mask=padding_mask,
+        frequencies_hz=torch.tensor(
+            [
+                float("nan") if sample.frequency_hz is None else sample.frequency_hz
+                for sample in samples
+            ],
+            dtype=torch.float32,
+        ),
         texts=tuple(sample.text for sample in samples),
     )

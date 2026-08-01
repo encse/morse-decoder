@@ -28,6 +28,9 @@ from morse_timing.audio_model import (
     MorseAudioCTCModel,
 )
 from morse_timing.audio_train import (
+    FREQUENCY_ACCURACY_THRESHOLD,
+    FREQUENCY_LOSS_WEIGHT,
+    FREQUENCY_TOLERANCE_HZ,
     OverfitMetrics,
     TONE_ACTIVITY_LOSS_WEIGHT,
     evaluate_overfit_dataset,
@@ -35,6 +38,24 @@ from morse_timing.audio_train import (
     set_seed,
     train_epoch,
 )
+
+
+def _load_model_state_compatibly(
+    model: MorseAudioCTCModel,
+    state: dict[str, torch.Tensor],
+) -> bool:
+    """Load old checkpoints while initializing their newly added frequency head."""
+
+    incompatible = model.load_state_dict(state, strict=False)
+    allowed_missing = {"frequency_head.weight", "frequency_head.bias"}
+    unexpected = set(incompatible.unexpected_keys)
+    missing = set(incompatible.missing_keys)
+    if unexpected or not missing.issubset(allowed_missing):
+        raise ValueError(
+            f"Incompatible model state: missing={sorted(missing)} "
+            f"unexpected={sorted(unexpected)}"
+        )
+    return bool(missing)
 
 
 def create_loader(
@@ -196,8 +217,13 @@ def load_training_checkpoint(
     checkpoint_model_config = AudioModelConfig(**checkpoint["model_config"])
     if asdict(checkpoint_model_config) != asdict(model.config):
         raise ValueError("Resume checkpoint model configuration does not match CLI options")
-    model.load_state_dict(checkpoint["model_state"])
-    optimizer.load_state_dict(checkpoint["optimizer_state"])
+    initialized_frequency_head = _load_model_state_compatibly(
+        model, checkpoint["model_state"]
+    )
+    if not initialized_frequency_head:
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+    else:
+        print("initialized_new_frequency_head optimizer_reset=true", flush=True)
     scheduler.load_state_dict(checkpoint["scheduler_state"])
     metrics = checkpoint.get("metrics", {})
     best_character_error_rate = checkpoint.get(
@@ -230,7 +256,7 @@ def initialize_model_from_checkpoint(
         raise ValueError(
             "Initialization checkpoint model configuration does not match CLI options"
         )
-    model.load_state_dict(checkpoint["model_state"])
+    _load_model_state_compatibly(model, checkpoint["model_state"])
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -580,6 +606,9 @@ def main(argv: list[str] | None = None) -> None:
         "perfect_epochs": args.perfect_epochs,
         "target_epochs": args.target_epochs,
         "tone_activity_loss_weight": TONE_ACTIVITY_LOSS_WEIGHT,
+        "frequency_loss_weight": FREQUENCY_LOSS_WEIGHT,
+        "frequency_tolerance_hz": FREQUENCY_TOLERANCE_HZ,
+        "frequency_accuracy_threshold": FREQUENCY_ACCURACY_THRESHOLD,
         "curriculum_target_reached": False,
     }
     if args.target_exact_text is not None:
@@ -653,6 +682,8 @@ def main(argv: list[str] | None = None) -> None:
             f"character_error_rate={validation.character_error_rate:.4f} "
             f"exact_tokens={validation.exact_token_accuracy:.4f} "
             f"exact_text={validation.exact_text_accuracy:.4f} "
+            f"frequency_mae_hz={validation.frequency_mean_absolute_error_hz:.2f} "
+            f"frequency_within_50hz={validation.frequency_within_50hz_accuracy:.4f} "
             f"lr={learning_rate:.6g} "
             f"example={validation.example_reference!r}->{validation.example_prediction!r}",
             flush=True,
@@ -705,6 +736,8 @@ def main(argv: list[str] | None = None) -> None:
             consecutive_target_epochs + 1
             if args.target_exact_text is not None
             and validation.exact_text_accuracy >= args.target_exact_text
+            and validation.frequency_within_50hz_accuracy
+            >= FREQUENCY_ACCURACY_THRESHOLD
             else 0
         )
         if consecutive_target_epochs >= args.target_epochs:
@@ -725,6 +758,8 @@ def main(argv: list[str] | None = None) -> None:
             print(
                 f"curriculum_target_reached epoch={epoch} "
                 f"exact_text={validation.exact_text_accuracy:.4f} "
+                f"frequency_within_50hz="
+                f"{validation.frequency_within_50hz_accuracy:.4f} "
                 f"consecutive={consecutive_target_epochs}",
                 flush=True,
             )
