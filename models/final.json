@@ -1,7 +1,42 @@
 {
-  "best_character_error_rate": 0.03442838370565046,
-  "best_token_error_rate": 0.0024004592182852373,
-  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.working-stage-064.pt",
+  "best_character_error_rate": 0.03377135348226019,
+  "best_token_error_rate": 0.002478735062359756,
+  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.stages/stage-065.pt",
+  "curriculum_ranges": {
+    "amplitude": [
+      30.0,
+      150.0
+    ],
+    "fade_depth": [
+      0.0,
+      60.0
+    ],
+    "fade_frequency": [
+      0.1,
+      2.0
+    ],
+    "frequency": [
+      100.0,
+      2000.0
+    ],
+    "jitter": [
+      0.0,
+      0.08
+    ],
+    "noise_power": [
+      0.0,
+      40.0
+    ],
+    "rise_fall": [
+      0.0,
+      10.0
+    ],
+    "wpm": [
+      10.0,
+      40.0
+    ]
+  },
+  "curriculum_stage": 65,
   "dataset_config": {
     "apply_input_filter": true,
     "audio": {
@@ -12,6 +47,16 @@
     },
     "extended_space_probability": 0.5,
     "fade_depth_percent": 60.0,
+    "gap_timing": {
+      "character_extreme_probability": 0.6,
+      "character_extreme_width_units": 0.3,
+      "max_character_units": 4.5,
+      "max_intra_character_units": 1.5,
+      "max_word_units": 9.0,
+      "min_character_units": 2.0,
+      "min_intra_character_units": 0.5,
+      "min_word_units": 5.5
+    },
     "leading_silence_seconds": 0.7,
     "max_amplitude_percent": 150.0,
     "max_characters": 12,
@@ -21,7 +66,7 @@
     "max_noise_only_seconds": 4.0,
     "max_rise_fall_ms": 10.0,
     "max_wpm": 40.0,
-    "min_amplitude_percent": 40.0,
+    "min_amplitude_percent": 30.0,
     "min_characters": 2,
     "min_extended_space_multiplier": 2,
     "min_fade_frequency_hz": 0.1,
@@ -47,9 +92,12 @@
     "word_boundary_sample_probability": 0.5,
     "wpm": 20.0
   },
-  "epoch": 14,
+  "epoch": 20,
   "experiment": {
-    "curriculum_target_reached": false,
+    "curriculum_target_reached": true,
+    "frequency_accuracy_threshold": 0.9,
+    "frequency_loss_weight": 0.05,
+    "frequency_tolerance_hz": 50.0,
     "perfect_epochs": 5,
     "regenerate_every": 10,
     "seed": 42,
@@ -61,14 +109,17 @@
   },
   "format_version": 1,
   "metrics": {
-    "character_error_rate": 0.03442838370565046,
-    "ctc_loss": 0.008314968204746644,
-    "exact_text_accuracy": 0.9525,
-    "exact_token_accuracy": 0.9525,
+    "character_error_rate": 0.03955321944809461,
+    "ctc_loss": 0.01141352965651701,
+    "exact_text_accuracy": 0.9533333333333334,
+    "exact_token_accuracy": 0.9533333333333334,
     "example_prediction": "_3UJPP )=",
     "example_reference": "_3UJPP )=",
-    "loss": 0.032778759946425755,
-    "token_error_rate": 0.0024004592182852373
+    "frequency_loss": 0.0016788098330634009,
+    "frequency_mean_absolute_error_hz": 9.658843496222245,
+    "frequency_within_50hz_accuracy": 0.9947368421052631,
+    "loss": 0.03611023624738057,
+    "token_error_rate": 0.0026091948024839534
   },
   "model_config": {
     "auxiliary_heads": true,
