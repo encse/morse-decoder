@@ -125,12 +125,12 @@ def tensor_description(path: Path, tensor: Tensor) -> dict[str, Any]:
 
 
 def export_state_dict(
-    output_path: Path,
+    output_directory: Path,
     model: MorseAudioCTCModel,
 ) -> Path:
     """Export model tensors as raw little-endian float32 files."""
 
-    weights_directory = output_path.with_suffix(".weights")
+    weights_directory = output_directory / "weights"
     weights_directory.mkdir(parents=True, exist_ok=True)
 
     tensors: dict[str, Any] = {}
@@ -202,12 +202,12 @@ def verify_wrapper_matches_model(
 
 def export_checkpoint(
     checkpoint_path: Path,
-    output_path: Path,
+    output_directory: Path,
     chunk_frames: int = 25,
     opset_version: int = 17,
     reference_duration_seconds: float = 0.5,
 ) -> None:
-    """Export one checkpoint and deterministic reference test tensors."""
+    """Export one checkpoint and its artifacts into one directory."""
 
     if chunk_frames <= 0:
         raise ValueError("Chunk frame count must be positive")
@@ -258,7 +258,8 @@ def export_checkpoint(
         cell_state,
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    output_path = output_directory / "model.onnx"
 
     try:
         torch.onnx.export(
@@ -300,9 +301,7 @@ def export_checkpoint(
         for node in onnx_model.graph.node
     )
 
-    test_data_directory = output_path.with_suffix(
-        output_path.suffix + ".testdata"
-    )
+    test_data_directory = output_directory / "testdata"
     test_data_directory.mkdir(parents=True, exist_ok=True)
 
     tensor_files = {
@@ -333,9 +332,7 @@ def export_checkpoint(
     dataset_config = restore_stage1_dataset_config(
         checkpoint["dataset_config"]
     )
-    reference_directory = output_path.with_suffix(
-        output_path.suffix + ".reference"
-    )
+    reference_directory = output_directory / "reference"
     reference_metadata_path = generate_reference(
         checkpoint_path,
         reference_directory,
@@ -403,9 +400,7 @@ def export_checkpoint(
         "dataset_config": asdict(dataset_config),
     }
 
-    metadata_path = output_path.with_suffix(
-        output_path.suffix + ".json"
-    )
+    metadata_path = output_directory / "metadata.json"
     metadata_path.write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -413,7 +408,7 @@ def export_checkpoint(
 
 
     weights_metadata_path = export_state_dict(
-        output_path,
+        output_directory,
         wrapper.model,
     )
 
@@ -451,7 +446,7 @@ def main(argv: list[str] | None = None) -> None:
     """Export a checkpoint and its deterministic reference tensors."""
 
     args = build_argument_parser().parse_args(argv)
-    output = args.output or args.checkpoint.with_suffix(".onnx")
+    output = args.output or args.checkpoint.with_suffix("")
 
     export_checkpoint(
         args.checkpoint,

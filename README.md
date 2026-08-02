@@ -374,7 +374,7 @@ data:
 ```bash
 conda run -n morse python -m morse_timing.export_onnx \
     models/morse-lstm-curriculum.pt \
-    --output models/morse-lstm-curriculum.onnx \
+    --output models/morse-lstm-curriculum \
     --chunk-frames 25 \
     --reference-duration 0.5
 ```
@@ -384,22 +384,27 @@ The ONNX model accepts `features`, `hidden_state`, and `cell_state`, and returns
 of one and uses the exported chunk length. The explicit state tensors allow a
 Go implementation to process consecutive chunks without losing LSTM state.
 
-One export creates the following files:
+`--output` names the export directory. If it is omitted, the checkpoint path
+without its extension is used. One export creates the following files:
 
 ```text
-models/morse-lstm-curriculum.onnx
-models/morse-lstm-curriculum.onnx.json
-models/morse-lstm-curriculum.weights/
-models/morse-lstm-curriculum.onnx.testdata/
-models/morse-lstm-curriculum.onnx.reference/
-├── waveform.f32
-├── expected_logits.f32
-└── metadata.json
+models/morse-lstm-curriculum/
+├── model.onnx
+├── metadata.json
+├── weights/
+│   ├── weights.json
+│   └── *.f32
+├── testdata/
+│   └── *.f32
+└── reference/
+    ├── waveform.f32
+    ├── expected_logits.f32
+    └── metadata.json
 ```
 
-The `.onnx.testdata` directory contains feature and recurrent-state inputs plus
+The `testdata` directory contains feature and recurrent-state inputs plus
 their expected outputs. It tests the Go model implementation independently of
-audio preprocessing. The `.onnx.reference` directory starts from a deterministic
+audio preprocessing. The `reference` directory starts from a deterministic
 waveform and records the logits produced by the normal Python production
 pipeline, including resampling, spectrogram creation, feature preparation, and
 stateful model inference. Raw tensors use little-endian `float32`; their shapes,
