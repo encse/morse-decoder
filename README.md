@@ -368,18 +368,47 @@ default for low-overhead real-time inference.
 
 ## ONNX export
 
-Export the stateful LSTM:
+Export the Go-compatible stateful LSTM together with deterministic reference
+data:
 
 ```bash
-python -m morse_timing.export_onnx \
+conda run -n morse python -m morse_timing.export_onnx \
     models/morse-lstm-curriculum.pt \
-    --output models/morse-lstm-curriculum.onnx
+    --output models/morse-lstm-curriculum.onnx \
+    --chunk-frames 25 \
+    --reference-duration 0.5
 ```
 
 The ONNX model accepts `features`, `hidden_state`, and `cell_state`, and returns
-`logits`, `frequency_hz`, `next_hidden_state`, and `next_cell_state`. Batch size
-and chunk length are dynamic. Export metadata is written to
-`models/morse-lstm-curriculum.onnx.json`.
+`logits`, `next_hidden_state`, and `next_cell_state`. It has a fixed batch size
+of one and uses the exported chunk length. The explicit state tensors allow a
+Go implementation to process consecutive chunks without losing LSTM state.
+
+One export creates the following files:
+
+```text
+models/morse-lstm-curriculum.onnx
+models/morse-lstm-curriculum.onnx.json
+models/morse-lstm-curriculum.weights/
+models/morse-lstm-curriculum.onnx.testdata/
+models/morse-lstm-curriculum.onnx.reference/
+├── waveform.f32
+├── expected_logits.f32
+└── metadata.json
+```
+
+The `.onnx.testdata` directory contains feature and recurrent-state inputs plus
+their expected outputs. It tests the Go model implementation independently of
+audio preprocessing. The `.onnx.reference` directory starts from a deterministic
+waveform and records the logits produced by the normal Python production
+pipeline, including resampling, spectrogram creation, feature preparation, and
+stateful model inference. Raw tensors use little-endian `float32`; their shapes,
+element counts, and filenames are recorded in the corresponding metadata.
+
+During export, the Go-compatible ONNX wrapper is compared exactly with the
+model's production `forward_stream` path. Export fails if their logits, hidden
+state, or cell state diverge. The top-level ONNX metadata also points to the
+waveform reference directory.
 
 ## Source layout
 
@@ -400,5 +429,6 @@ src/morse_timing/
 ├── curriculum.py            adaptive plan execution
 ├── audio_inference.py       synthesized and WAV inference
 ├── live_inference.py        streaming audio inference
-└── export_onnx.py           stateful ONNX export
+├── generate_go_reference.py waveform-to-logits Go reference data
+└── export_onnx.py           stateful ONNX and reference export
 ```

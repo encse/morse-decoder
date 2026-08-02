@@ -27,6 +27,7 @@ morse-audio-decode = "morse_timing.audio_inference:main"
 morse-audio-train = "morse_timing.train:main"
 morse-curriculum = "morse_timing.curriculum:main"
 morse-export-onnx = "morse_timing.export_onnx:main"
+morse-generate-go-reference = "morse_timing.generate_go_reference:main"
 morse-live-decode = "morse_timing.live_inference:main"
 
 [tool.setuptools.packages.find]

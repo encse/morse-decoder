@@ -233,6 +233,38 @@ class MorseAudioDecoder:
         )
 
     @torch.inference_mode()
+    def predict_waveform_logits(
+        self,
+        waveform: torch.Tensor,
+        sample_rate: int,
+        chunk_frames: int = 25,
+    ) -> torch.Tensor:
+        """Run the production preprocessing and model pipeline on a waveform."""
+
+        features = self._prepare_waveform_features(waveform, sample_rate)
+        return self._predict_logits(features, chunk_frames)
+
+    def _predict_logits(
+        self,
+        features: torch.Tensor,
+        chunk_frames: int,
+    ) -> torch.Tensor:
+        """Run stateful model chunks and join their frame logits."""
+
+        if chunk_frames <= 0:
+            raise ValueError("Chunk size must be a positive number of frames")
+        if self.model.config.sequence_model != "lstm":
+            raise ValueError("Streaming inference requires an LSTM checkpoint")
+
+        chunks: list[torch.Tensor] = []
+        state: tuple[torch.Tensor, torch.Tensor] | None = None
+        for start in range(0, features.shape[0], chunk_frames):
+            chunk = features[start : start + chunk_frames].unsqueeze(0).to(self.device)
+            logits, state = self.model.forward_stream(chunk, state)
+            chunks.append(logits[0].cpu())
+        return torch.cat(chunks, dim=0)
+
+    @torch.inference_mode()
     def decode_wav(
         self,
         path: str | Path,
@@ -244,23 +276,17 @@ class MorseAudioDecoder:
         waveform, source_sample_rate = load_pcm_wav(input_path)
         duration_seconds = waveform.numel() / source_sample_rate
         model_sample_rate = self.dataset_config.audio.sample_rate
-        waveform = _resample_waveform(
-            waveform, source_sample_rate, model_sample_rate
-        )
+        features = self._prepare_waveform_features(waveform, source_sample_rate)
         trailing_samples = round(
             self.dataset_config.trailing_silence_seconds * model_sample_rate
         )
         if trailing_samples:
-            waveform = F.pad(waveform, (0, trailing_samples))
-        spectrogram = compute_log_magnitude_stft(
-            waveform,
-            model_sample_rate,
-            self.dataset_config.spectrogram,
-        )
-        features = prepare_spectrogram_features(
-            spectrogram.values,
-            self.dataset_config.spectrogram,
-        ).transpose(0, 1).contiguous()
+            resampled = _resample_waveform(
+                waveform, source_sample_rate, model_sample_rate
+            )
+            features = self._prepare_waveform_features(
+                F.pad(resampled, (0, trailing_samples)), model_sample_rate
+            )
         frame_tokens, predicted, normalized_prediction, morse, decoded_text, valid, error = (
             self._decode_features(features, chunk_frames)
         )
@@ -278,6 +304,25 @@ class MorseAudioDecoder:
             frequency_hz=self._predict_frequency(features),
             error=error,
         )
+
+    def _prepare_waveform_features(
+        self,
+        waveform: torch.Tensor,
+        sample_rate: int,
+    ) -> torch.Tensor:
+        """Apply checkpoint-defined preprocessing to waveform samples."""
+
+        model_sample_rate = self.dataset_config.audio.sample_rate
+        waveform = _resample_waveform(waveform, sample_rate, model_sample_rate)
+        spectrogram = compute_log_magnitude_stft(
+            waveform,
+            model_sample_rate,
+            self.dataset_config.spectrogram,
+        )
+        return prepare_spectrogram_features(
+            spectrogram.values,
+            self.dataset_config.spectrogram,
+        ).transpose(0, 1).contiguous()
 
     def _predict_frequency(self, features: torch.Tensor) -> float:
         """Estimate one carrier frequency from the complete input."""
@@ -342,17 +387,8 @@ class MorseAudioDecoder:
     ) -> list[int]:
         """Predict every frame while retaining LSTM state between chunks."""
 
-        if chunk_frames <= 0:
-            raise ValueError("Chunk size must be a positive number of frames")
-        if self.model.config.sequence_model != "lstm":
-            raise ValueError("Streaming inference requires an LSTM checkpoint")
-        frame_tokens: list[int] = []
-        state: tuple[torch.Tensor, torch.Tensor] | None = None
-        for start in range(0, features.shape[0], chunk_frames):
-            chunk = features[start : start + chunk_frames].unsqueeze(0).to(self.device)
-            logits, state = self.model.forward_stream(chunk, state)
-            frame_tokens.extend(logits[0].argmax(dim=-1).cpu().tolist())
-        return frame_tokens
+        logits = self._predict_logits(features, chunk_frames)
+        return logits.argmax(dim=-1).tolist()
 
     def effective_config(
         self,

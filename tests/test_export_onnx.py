@@ -5,7 +5,11 @@ import torch
 from morse_timing.audio_dataset import Stage1DatasetConfig
 from morse_timing.audio_model import AudioModelConfig, MorseAudioCTCModel
 from morse_timing.audio_train import OverfitMetrics, save_checkpoint
-from morse_timing.export_onnx import StreamingOnnxWrapper, load_wrapper
+from morse_timing.export_onnx import (
+    StreamingOnnxWrapper,
+    load_wrapper,
+    verify_wrapper_matches_model,
+)
 
 
 def test_streaming_onnx_wrapper_has_explicit_reusable_state() -> None:
@@ -16,15 +20,17 @@ def test_streaming_onnx_wrapper_has_explicit_reusable_state() -> None:
         num_lstm_layers=1,
         sequence_model="lstm",
     )
-    wrapper = StreamingOnnxWrapper(MorseAudioCTCModel(config)).eval()
-    features = torch.randn(2, 9, 65)
-    hidden = torch.zeros(1, 2, 7)
+    model = MorseAudioCTCModel(config).eval()
+    wrapper = StreamingOnnxWrapper(model)
+    features = torch.randn(1, 9, 65)
+    hidden = torch.zeros(1, 1, 7)
     cell = torch.zeros_like(hidden)
 
-    logits, frequency_hz, next_hidden, next_cell = wrapper(features, hidden, cell)
+    logits, next_hidden, next_cell = verify_wrapper_matches_model(
+        wrapper, features, hidden, cell
+    )
 
-    assert logits.shape == (2, 9, 5)
-    assert frequency_hz.shape == (2,)
+    assert logits.shape == (1, 9, 5)
     assert next_hidden.shape == hidden.shape
     assert next_cell.shape == cell.shape
 
