@@ -94,6 +94,22 @@ def test_adaptive_curriculum_starts_at_exact_configured_values() -> None:
     }
 
 
+def test_adaptive_curriculum_can_start_with_configured_ranges() -> None:
+    dimensions = {
+        "amplitude": {
+            "lower_limit": 10,
+            "upper_limit": 150,
+            "start_minimum": 29,
+            "start_maximum": 150,
+            "step": 1,
+        },
+    }
+
+    assert _adaptive_start_ranges(dimensions) == {
+        "amplitude": (29, 150),
+    }
+
+
 def test_adaptive_stage_restarts_learning_rate_and_sets_accuracy_target() -> None:
     command = _training_command(
         {

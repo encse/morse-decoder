@@ -217,17 +217,24 @@ def _training_command(
 def _adaptive_start_ranges(
     dimensions: dict[str, dict[str, float]],
 ) -> dict[str, tuple[float, float]]:
-    """Validate and return one exact initial value for every dimension."""
+    """Validate and return the configured initial range for every dimension."""
 
     ranges: dict[str, tuple[float, float]] = {}
     for name, specification in dimensions.items():
         lower = float(specification["lower_limit"])
         upper = float(specification["upper_limit"])
-        start = float(specification["start"])
+        if "start" in specification:
+            start_minimum = start_maximum = float(specification["start"])
+        else:
+            start_minimum = float(specification["start_minimum"])
+            start_maximum = float(specification["start_maximum"])
         step = float(specification["step"])
-        if step <= 0.0 or not lower <= start <= upper:
+        if (
+            step <= 0.0
+            or not lower <= start_minimum <= start_maximum <= upper
+        ):
             raise ValueError(f"Invalid adaptive curriculum range for {name}")
-        ranges[name] = (start, start)
+        ranges[name] = (start_minimum, start_maximum)
     return ranges
 
 
@@ -408,6 +415,13 @@ def _run_adaptive_plan(
         None if reference_wav_value is None else Path(str(reference_wav_value))
     )
     reference_device = device_override or str(training.get("device", "auto"))
+    initial_checkpoint_value = plan.get("initial_checkpoint")
+    initial_checkpoint = (
+        None
+        if initial_checkpoint_value is None
+        else Path(str(initial_checkpoint_value))
+    )
+    resume_initial_checkpoint = bool(plan.get("resume_initial_checkpoint", False))
     if (
         not 0.0 < threshold <= 1.0
         or target_epochs <= 0
@@ -477,8 +491,14 @@ def _run_adaptive_plan(
             previous_model = working_checkpoint
             resume_training = True
         else:
-            previous_model = stable_checkpoint
-            resume_training = False
+            previous_model = stable_checkpoint or initial_checkpoint
+            resume_training = (
+                stable_checkpoint is None
+                and initial_checkpoint is not None
+                and resume_initial_checkpoint
+            )
+        if previous_model is not None and not previous_model.is_file():
+            raise FileNotFoundError(f"Initial curriculum checkpoint not found: {previous_model}")
         _write_adaptive_state(
             state_path,
             threshold=threshold,
@@ -520,7 +540,9 @@ def _run_adaptive_plan(
                 threshold,
                 target_epochs,
                 resume=resume_training,
-                apply_input_filter=completed_stages > 0,
+                apply_input_filter=bool(
+                    training.get("apply_input_filter", completed_stages > 0)
+                ),
             ),
             check=True,
         )
