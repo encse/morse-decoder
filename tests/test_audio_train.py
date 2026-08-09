@@ -63,7 +63,6 @@ def test_one_training_epoch_updates_the_audio_model() -> None:
     assert torch.isfinite(torch.tensor(loss))
     assert not torch.equal(original, model.classifier.weight)
     assert model.tone_activity_head.weight.grad is not None
-    assert model.frequency_head.weight.grad is not None
 
 
 def test_noise_only_batch_with_empty_ctc_targets_can_be_trained() -> None:

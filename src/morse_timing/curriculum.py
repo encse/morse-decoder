@@ -12,7 +12,6 @@ from typing import Any
 
 import numpy  # Load the Conda OpenMP runtime before PyTorch on macOS.
 
-from morse_timing.audio_train import FREQUENCY_ACCURACY_THRESHOLD
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -249,9 +248,7 @@ def _checkpoint_reached_target(path: Path) -> bool:
     """Require both text and 50 Hz carrier-frequency curriculum targets."""
 
     metadata = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
-    return bool(metadata["experiment"]["curriculum_target_reached"]) and float(
-        metadata["metrics"].get("frequency_within_50hz_accuracy", 0.0)
-    ) >= FREQUENCY_ACCURACY_THRESHOLD
+    return bool(metadata["experiment"]["curriculum_target_reached"])
 
 
 def _archive_completed_stage(
@@ -337,8 +334,7 @@ def _print_reference_wav_result(
     print(f"  predicted_morse={result.predicted_morse}", flush=True)
     print(f"  decoded_text={result.decoded_text!r}", flush=True)
     print(
-        f"  valid={result.valid} duration={result.duration_seconds:.3f}s "
-        f"frequency_hz={result.frequency_hz:.2f}",
+        f"  valid={result.valid} duration={result.duration_seconds:.3f}s ",
         flush=True,
     )
     if result.error:

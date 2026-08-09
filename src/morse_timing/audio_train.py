@@ -43,16 +43,9 @@ class OverfitMetrics:
     example_reference: str
     example_prediction: str
     ctc_loss: float = 0.0
-    frequency_loss: float = 0.0
-    frequency_mean_absolute_error_hz: float = 0.0
-    frequency_within_50hz_accuracy: float = 0.0
 
 
 TONE_ACTIVITY_LOSS_WEIGHT = 0.3
-FREQUENCY_LOSS_WEIGHT = 0.05
-FREQUENCY_SCALE_HZ = 1_000.0
-FREQUENCY_TOLERANCE_HZ = 50.0
-FREQUENCY_ACCURACY_THRESHOLD = 0.9
 
 
 def select_device(requested: str) -> torch.device:
@@ -208,9 +201,6 @@ def train_epoch(
                 "classifier", lambda: model.classify_frames(recurrent_output)
             )
             tone_logits = model.classify_auxiliary(recurrent_output)
-            frequency_hz = model.estimate_frequency(
-                recurrent_output, batch.input_lengths
-            )
             output_lengths = batch.input_lengths
             loss = timed(
                 "loss",
@@ -219,7 +209,6 @@ def train_epoch(
                     output_lengths,
                     batch,
                     tone_logits,
-                    frequency_hz,
                 ),
             )
             timed("backward", loss.backward)
@@ -230,7 +219,6 @@ def train_epoch(
                 logits,
                 output_lengths,
                 tone_logits,
-                frequency_hz,
             ) = model.forward_with_auxiliary(
                 batch.spectrograms,
                 batch.input_lengths,
@@ -240,7 +228,6 @@ def train_epoch(
                 output_lengths,
                 batch,
                 tone_logits,
-                frequency_hz,
             )
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
@@ -282,10 +269,6 @@ def evaluate_overfit_dataset(
     model.eval()
     total_loss = 0.0
     total_ctc_loss = 0.0
-    total_frequency_loss = 0.0
-    frequency_absolute_error = 0.0
-    frequency_within_50hz = 0
-    frequency_sample_count = 0
     sample_count = 0
     token_edits = 0
     target_token_count = 0
@@ -301,7 +284,6 @@ def evaluate_overfit_dataset(
             logits,
             output_lengths,
             tone_logits,
-            frequency_hz,
         ) = model.forward_with_auxiliary(
             batch.spectrograms,
             batch.input_lengths,
@@ -317,24 +299,12 @@ def evaluate_overfit_dataset(
             output_lengths,
             batch,
             tone_logits,
-            frequency_hz,
             ctc_loss,
         )
-        frequency_loss = _frequency_loss(frequency_hz, batch.frequencies_hz)
         predictions = greedy_decode_batch(logits, output_lengths)
         references = split_concatenated_targets(batch.targets, batch.target_lengths)
         total_loss += float(loss.detach()) * len(batch.texts)
         total_ctc_loss += float(ctc_loss.detach()) * len(batch.texts)
-        valid_frequencies = torch.isfinite(batch.frequencies_hz)
-        if valid_frequencies.any():
-            errors = (
-                frequency_hz[valid_frequencies] - batch.frequencies_hz[valid_frequencies]
-            ).abs()
-            count = int(valid_frequencies.sum())
-            total_frequency_loss += float(frequency_loss.detach()) * count
-            frequency_absolute_error += float(errors.sum())
-            frequency_within_50hz += int((errors <= FREQUENCY_TOLERANCE_HZ).sum())
-            frequency_sample_count += count
         sample_count += len(batch.texts)
         for text, reference, prediction in zip(
             batch.texts, references, predictions, strict=True
@@ -367,18 +337,6 @@ def evaluate_overfit_dataset(
         example_reference=example_reference,
         example_prediction=example_prediction,
         ctc_loss=total_ctc_loss / sample_count,
-        frequency_loss=(
-            total_frequency_loss / frequency_sample_count
-            if frequency_sample_count else 0.0
-        ),
-        frequency_mean_absolute_error_hz=(
-            frequency_absolute_error / frequency_sample_count
-            if frequency_sample_count else 0.0
-        ),
-        frequency_within_50hz_accuracy=(
-            frequency_within_50hz / frequency_sample_count
-            if frequency_sample_count else 0.0
-        ),
     )
 
 
@@ -387,7 +345,6 @@ def _training_loss(
     output_lengths: Tensor,
     batch: AudioBatch,
     tone_activity_logits: Tensor,
-    frequency_hz: Tensor,
     ctc_loss: Tensor | None = None,
 ) -> Tensor:
     """Calculate the fixed CTC plus tone-activity training objective."""
@@ -405,24 +362,9 @@ def _training_loss(
         batch.tone_activity,
         reduction="none",
     )[valid].mean()
-    frequency_loss = _frequency_loss(frequency_hz, batch.frequencies_hz)
     return (
         ctc_loss
         + TONE_ACTIVITY_LOSS_WEIGHT * tone_loss.to(ctc_loss.device)
-        + FREQUENCY_LOSS_WEIGHT * frequency_loss.to(ctc_loss.device)
-    )
-
-
-def _frequency_loss(prediction_hz: Tensor, target_hz: Tensor) -> Tensor:
-    """Calculate normalized Smooth L1 loss for signal-bearing inputs."""
-
-    valid = torch.isfinite(target_hz)
-    if not valid.any():
-        return prediction_hz.sum() * 0.0
-    return F.smooth_l1_loss(
-        prediction_hz[valid] / FREQUENCY_SCALE_HZ,
-        target_hz[valid] / FREQUENCY_SCALE_HZ,
-        beta=0.05,
     )
 
 

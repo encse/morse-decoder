@@ -184,10 +184,8 @@ class MorseAudioCTCModel(nn.Module):
             self.tone_activity_head: nn.Module | None = nn.Linear(
                 recurrent_features, 1
             )
-            self.frequency_head: nn.Module | None = nn.Linear(recurrent_features, 1)
         else:
             self.tone_activity_head = None
-            self.frequency_head = None
 
     def forward(
         self,
@@ -210,8 +208,8 @@ class MorseAudioCTCModel(nn.Module):
         self,
         spectrograms: Tensor,
         input_lengths: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        """Return CTC logits, tone activity, and carrier frequency in Hz."""
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        """Return CTC logits and the training-only tone activity output."""
 
         if self.tone_activity_head is None:
             raise ValueError("Auxiliary heads are disabled in this model configuration")
@@ -225,25 +223,7 @@ class MorseAudioCTCModel(nn.Module):
         )
         logits = self.classify_frames(recurrent_output)
         tone_activity_logits = self.classify_auxiliary(recurrent_output)
-        frequency_hz = self.estimate_frequency(recurrent_output, input_lengths)
-        return logits, input_lengths, tone_activity_logits, frequency_hz
-
-    def forward_with_frequency(
-        self,
-        spectrograms: Tensor,
-        input_lengths: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        """Return CTC logits and one carrier-frequency estimate per input."""
-
-        self._validate_inputs(spectrograms, input_lengths)
-        cnn_output = self.extract_frequency_features(spectrograms)
-        projected = self.project_frames(cnn_output)
-        encoded = self.encode_frames(projected, input_lengths, spectrograms.shape[1])
-        return (
-            self.classify_frames(encoded),
-            input_lengths,
-            self.estimate_frequency(encoded, input_lengths),
-        )
+        return logits, input_lengths, tone_activity_logits
 
     def classify_auxiliary(
         self,
@@ -254,23 +234,6 @@ class MorseAudioCTCModel(nn.Module):
         if self.tone_activity_head is None:
             raise ValueError("Auxiliary heads are disabled in this model configuration")
         return self.tone_activity_head(recurrent_output).squeeze(-1)
-
-    def estimate_frequency(
-        self,
-        recurrent_output: Tensor,
-        input_lengths: Tensor,
-    ) -> Tensor:
-        """Pool valid frames and estimate a positive carrier frequency in Hz."""
-
-        if self.frequency_head is None:
-            raise ValueError("Auxiliary heads are disabled in this model configuration")
-        positions = torch.arange(
-            recurrent_output.shape[1], device=recurrent_output.device
-        ).unsqueeze(0)
-        valid = positions < input_lengths.unsqueeze(1)
-        pooled = (recurrent_output * valid.unsqueeze(-1)).sum(dim=1)
-        pooled = pooled / input_lengths.to(recurrent_output.dtype).unsqueeze(1)
-        return F.softplus(self.frequency_head(pooled).squeeze(-1)) * 1_000.0
 
     def extract_frequency_features(self, spectrograms: Tensor) -> Tensor:
         """Run the frequency CNN while preserving the time dimension."""

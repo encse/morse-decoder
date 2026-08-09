@@ -37,24 +37,19 @@ def test_completed_curriculum_stage_is_archived_with_ranges(tmp_path: Path) -> N
     assert metadata["curriculum_ranges"] == {"wpm": [14.0, 26.0]}
 
 
-def test_curriculum_target_requires_frequency_accuracy(tmp_path: Path) -> None:
+def test_curriculum_target_uses_completion_flag(tmp_path: Path) -> None:
     checkpoint = tmp_path / "model.pt"
     metadata_path = checkpoint.with_suffix(".json")
     metadata_path.write_text(
         json.dumps(
             {
                 "experiment": {"curriculum_target_reached": True},
-                "metrics": {"frequency_within_50hz_accuracy": 0.899},
+                "metrics": {},
             }
         ),
         encoding="utf-8",
     )
 
-    assert not curriculum_module._checkpoint_reached_target(checkpoint)
-
-    values = json.loads(metadata_path.read_text(encoding="utf-8"))
-    values["metrics"]["frequency_within_50hz_accuracy"] = 0.9
-    metadata_path.write_text(json.dumps(values), encoding="utf-8")
     assert curriculum_module._checkpoint_reached_target(checkpoint)
 
 
@@ -188,7 +183,6 @@ def test_first_curriculum_stage_builds_the_model_from_scratch(
                     "experiment": {"curriculum_target_reached": True},
                     "metrics": {
                         "exact_text_accuracy": 0.95,
-                        "frequency_within_50hz_accuracy": 0.9,
                     },
                 }
             ),
@@ -434,9 +428,6 @@ def test_failed_dimension_is_abandoned_and_next_dimension_starts_from_stable_mod
                     },
                     "metrics": {
                         "exact_text_accuracy": exact_text,
-                        "frequency_within_50hz_accuracy": (
-                            0.9 if len(commands) == 2 else 0.0
-                        ),
                     },
                 }
             ),

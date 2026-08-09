@@ -123,16 +123,14 @@ def test_init_from_restores_only_model_weights(tmp_path: Path) -> None:
         assert torch.equal(expected, restored)
 
 
-def test_init_from_old_checkpoint_initializes_missing_frequency_head(
+def test_init_from_old_checkpoint_ignores_removed_frequency_head(
     tmp_path: Path,
 ) -> None:
     config = AudioModelConfig(projection_size=8, hidden_size=8, dense_layers=2)
     source = MorseAudioCTCModel(config)
-    old_state = {
-        name: value
-        for name, value in source.state_dict().items()
-        if not name.startswith("frequency_head.")
-    }
+    old_state = dict(source.state_dict())
+    old_state["frequency_head.weight"] = torch.zeros(1, config.hidden_size)
+    old_state["frequency_head.bias"] = torch.zeros(1)
     checkpoint = tmp_path / "old-weights.pt"
     torch.save(
         {"model_config": asdict(config), "model_state": old_state}, checkpoint
@@ -141,7 +139,7 @@ def test_init_from_old_checkpoint_initializes_missing_frequency_head(
 
     initialize_model_from_checkpoint(checkpoint, target, torch.device("cpu"))
 
-    assert target.frequency_head is not None
+    assert not hasattr(target, "frequency_head")
     assert torch.equal(target.classifier.weight, source.classifier.weight)
 
 

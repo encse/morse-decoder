@@ -68,7 +68,6 @@ class AudioDecodeResult:
     valid: bool
     exact_tokens: bool
     exact_text: bool
-    frequency_hz: float
     error: str | None = None
 
 
@@ -86,7 +85,6 @@ class WavDecodeResult:
     predicted_morse: str
     decoded_text: str
     valid: bool
-    frequency_hz: float
     error: str | None = None
 
 
@@ -156,8 +154,10 @@ class MorseAudioDecoder:
             raise ValueError("Unsupported checkpoint format")
         model = MorseAudioCTCModel(AudioModelConfig(**checkpoint["model_config"]))
         incompatible = model.load_state_dict(checkpoint["model_state"], strict=False)
-        if incompatible.unexpected_keys or not set(incompatible.missing_keys).issubset(
-            {"frequency_head.weight", "frequency_head.bias"}
+        allowed_legacy = {"frequency_head.weight", "frequency_head.bias"}
+        if (
+            not set(incompatible.unexpected_keys).issubset(allowed_legacy)
+            or incompatible.missing_keys
         ):
             raise ValueError("Checkpoint model weights are incompatible")
         dataset_config = restore_stage1_dataset_config(checkpoint["dataset_config"])
@@ -228,7 +228,6 @@ class MorseAudioDecoder:
             valid=valid,
             exact_tokens=predicted == sample.expected_tokens,
             exact_text=decoded_text == sample.text,
-            frequency_hz=self._predict_frequency(sample.features),
             error=error,
         )
 
@@ -301,7 +300,6 @@ class MorseAudioDecoder:
             predicted_morse=morse,
             decoded_text=decoded_text,
             valid=valid,
-            frequency_hz=self._predict_frequency(features),
             error=error,
         )
 
@@ -323,14 +321,6 @@ class MorseAudioDecoder:
             spectrogram.values,
             self.dataset_config.spectrogram,
         ).transpose(0, 1).contiguous()
-
-    def _predict_frequency(self, features: torch.Tensor) -> float:
-        """Estimate one carrier frequency from the complete input."""
-
-        values = features.unsqueeze(0).to(self.device)
-        lengths = torch.tensor([features.shape[0]], device=self.device)
-        _, _, frequency_hz = self.model.forward_with_frequency(values, lengths)
-        return float(frequency_hz[0].cpu())
 
     def _decode_features(
         self,
@@ -1093,7 +1083,6 @@ def main(argv: list[str] | None = None) -> None:
 
     # print(f"predicted_morse={result.predicted_morse}")
     print(f"decoded_text= {result.decoded_text!r}")
-    print(f"frequency_hz= {result.frequency_hz:.2f}")
     print(validity_line)
 
     if result.error:
