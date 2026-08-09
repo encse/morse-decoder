@@ -1,11 +1,11 @@
 {
   "name": "morse-lstm-amplitude-curriculum",
   "output_directory": "models",
-  "initial_checkpoint": "/kaggle/working/models/final.pt",
-  "resume_initial_checkpoint": true,
+  "initial_checkpoint": null,
+  "resume_initial_checkpoint": false,
   "reference_wav": "reference.wav",
   "adaptive": {
-    "exact_text_threshold": 0.95,
+    "exact_text_threshold": 0.98,
     "required_epochs": 2,
     "max_epochs_per_dimension": 50,
     "selection_seed": 42
@@ -13,7 +13,7 @@
   "training": {
     "epochs": 1000000,
     "early_stopping": 0,
-    "train_samples": 12000,
+    "train_samples": 6000,
     "validation_samples": 1200,
     "noise_only_probability": 0.2,
     "batch_size": 32,
@@ -58,7 +58,7 @@
       "upper_limit": 150,
       "start_minimum": 29,
       "start_maximum": 150,
-      "step": 1
+      "step": 5
     },
     "fade_depth": {
       "lower_limit": 0,
