@@ -82,10 +82,11 @@ def load_wrapper(
         strict=False,
     )
     allowed_legacy_keys = {"frequency_head.weight", "frequency_head.bias"}
+    allowed_missing_keys = {"tone_length_head.weight", "tone_length_head.bias"}
 
     if (
         not set(incompatible.unexpected_keys).issubset(allowed_legacy_keys)
-        or incompatible.missing_keys
+        or not set(incompatible.missing_keys).issubset(allowed_missing_keys)
     ):
         raise ValueError(
             "Checkpoint model weights are incompatible: "

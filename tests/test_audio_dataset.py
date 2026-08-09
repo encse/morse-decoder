@@ -229,6 +229,7 @@ def test_audio_batch_padding_lengths_and_concatenated_targets() -> None:
     assert batch.target_lengths.tolist() == [3, 13]
     assert torch.equal(batch.targets, torch.cat([samples[0].targets, samples[1].targets]))
     assert batch.tone_activity.shape == batch.spectrograms.shape[:2]
+    assert batch.tone_length.shape == batch.spectrograms.shape[:2]
     assert torch.all(batch.padding_mask[0, samples[0].input_length :])
     assert not torch.any(batch.padding_mask[1])
 
@@ -246,6 +247,8 @@ def test_tone_activity_marks_frames_that_overlap_the_tone() -> None:
 
     assert sample.tone_activity[:3].tolist() == [1.0, 1.0, 1.0]
     assert sample.tone_activity[3:].sum() == 0.0
+    assert sample.tone_length[:3].tolist() == [1.0, 2.0, 3.0]
+    assert sample.tone_length[3:].sum() == 0.0
 
 
 def test_extended_word_gap_changes_only_audio_duration_not_the_ctc_target() -> None:
@@ -392,6 +395,7 @@ def test_noise_only_samples_have_empty_targets_and_no_tone_activity() -> None:
     assert sample.targets.numel() == 0
     assert sample.input_length == 100
     assert torch.all(sample.tone_activity == 0.0)
+    assert torch.all(sample.tone_length == 0.0)
     assert torch.any(sample.spectrogram > 0.0)
     assert torch.equal(sample.spectrogram, dataset[0].spectrogram)
 

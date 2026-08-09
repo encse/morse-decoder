@@ -155,9 +155,10 @@ class MorseAudioDecoder:
         model = MorseAudioCTCModel(AudioModelConfig(**checkpoint["model_config"]))
         incompatible = model.load_state_dict(checkpoint["model_state"], strict=False)
         allowed_legacy = {"frequency_head.weight", "frequency_head.bias"}
+        allowed_missing = {"tone_length_head.weight", "tone_length_head.bias"}
         if (
             not set(incompatible.unexpected_keys).issubset(allowed_legacy)
-            or incompatible.missing_keys
+            or not set(incompatible.missing_keys).issubset(allowed_missing)
         ):
             raise ValueError("Checkpoint model weights are incompatible")
         dataset_config = restore_stage1_dataset_config(checkpoint["dataset_config"])

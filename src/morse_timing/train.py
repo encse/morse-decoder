@@ -28,8 +28,13 @@ from morse_timing.audio_model import (
     MorseAudioCTCModel,
 )
 from morse_timing.audio_train import (
+    AUXILIARY_GRADIENT_TARGET_RATIO,
+    AuxiliaryLossWeights,
+    MAX_AUXILIARY_LOSS_WEIGHT,
+    MIN_AUXILIARY_LOSS_WEIGHT,
     OverfitMetrics,
     TONE_ACTIVITY_LOSS_WEIGHT,
+    TONE_LENGTH_LOSS_WEIGHT,
     evaluate_overfit_dataset,
     select_device,
     set_seed,
@@ -45,14 +50,29 @@ def _load_model_state_compatibly(
 
     incompatible = model.load_state_dict(state, strict=False)
     allowed_unexpected = {"frequency_head.weight", "frequency_head.bias"}
+    allowed_missing = {"tone_length_head.weight", "tone_length_head.bias"}
     unexpected = set(incompatible.unexpected_keys)
     missing = set(incompatible.missing_keys)
-    if not unexpected.issubset(allowed_unexpected) or missing:
+    if (
+        not unexpected.issubset(allowed_unexpected)
+        or not missing.issubset(allowed_missing)
+    ):
         raise ValueError(
             f"Incompatible model state: missing={sorted(missing)} "
             f"unexpected={sorted(unexpected)}"
         )
-    return bool(unexpected)
+    return bool(unexpected or missing)
+
+
+def _restore_auxiliary_loss_weights(
+    model: MorseAudioCTCModel, checkpoint: dict[str, Any]
+) -> None:
+    values = checkpoint.get("auxiliary_loss_weights")
+    if values is not None:
+        model._auxiliary_loss_weights = AuxiliaryLossWeights(
+            tone=float(values["tone"]),
+            tone_length=float(values["tone_length"]),
+        )
 
 
 def create_loader(
@@ -129,6 +149,11 @@ def save_training_checkpoint(
             "optimizer_state": optimizer.state_dict(),
             "scheduler_state": scheduler.state_dict(),
             "experiment": experiment,
+            "auxiliary_loss_weights": (
+                asdict(model._auxiliary_loss_weights)
+                if hasattr(model, "_auxiliary_loss_weights")
+                else None
+            ),
         }
     torch.save(checkpoint, path)
     metadata = {
@@ -217,6 +242,7 @@ def load_training_checkpoint(
     removed_frequency_head = _load_model_state_compatibly(
         model, checkpoint["model_state"]
     )
+    _restore_auxiliary_loss_weights(model, checkpoint)
     if not removed_frequency_head:
         optimizer.load_state_dict(checkpoint["optimizer_state"])
     else:
@@ -254,6 +280,7 @@ def initialize_model_from_checkpoint(
             "Initialization checkpoint model configuration does not match CLI options"
         )
     _load_model_state_compatibly(model, checkpoint["model_state"])
+    _restore_auxiliary_loss_weights(model, checkpoint)
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -603,6 +630,10 @@ def main(argv: list[str] | None = None) -> None:
         "perfect_epochs": args.perfect_epochs,
         "target_epochs": args.target_epochs,
         "tone_activity_loss_weight": TONE_ACTIVITY_LOSS_WEIGHT,
+        "tone_length_loss_weight": TONE_LENGTH_LOSS_WEIGHT,
+        "auxiliary_gradient_target_ratio": AUXILIARY_GRADIENT_TARGET_RATIO,
+        "minimum_auxiliary_loss_weight": MIN_AUXILIARY_LOSS_WEIGHT,
+        "maximum_auxiliary_loss_weight": MAX_AUXILIARY_LOSS_WEIGHT,
         "curriculum_target_reached": False,
     }
     if args.target_exact_text is not None:

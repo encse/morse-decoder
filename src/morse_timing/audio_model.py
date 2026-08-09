@@ -184,8 +184,12 @@ class MorseAudioCTCModel(nn.Module):
             self.tone_activity_head: nn.Module | None = nn.Linear(
                 recurrent_features, 1
             )
+            self.tone_length_head: nn.Module | None = nn.Linear(
+                recurrent_features, 1
+            )
         else:
             self.tone_activity_head = None
+            self.tone_length_head = None
 
     def forward(
         self,
@@ -208,8 +212,8 @@ class MorseAudioCTCModel(nn.Module):
         self,
         spectrograms: Tensor,
         input_lengths: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor]:
-        """Return CTC logits and the training-only tone activity output."""
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Return CTC logits and both training-only tone outputs."""
 
         if self.tone_activity_head is None:
             raise ValueError("Auxiliary heads are disabled in this model configuration")
@@ -223,7 +227,8 @@ class MorseAudioCTCModel(nn.Module):
         )
         logits = self.classify_frames(recurrent_output)
         tone_activity_logits = self.classify_auxiliary(recurrent_output)
-        return logits, input_lengths, tone_activity_logits
+        tone_length = self.estimate_tone_length(recurrent_output)
+        return logits, input_lengths, tone_activity_logits, tone_length
 
     def classify_auxiliary(
         self,
@@ -234,6 +239,13 @@ class MorseAudioCTCModel(nn.Module):
         if self.tone_activity_head is None:
             raise ValueError("Auxiliary heads are disabled in this model configuration")
         return self.tone_activity_head(recurrent_output).squeeze(-1)
+
+    def estimate_tone_length(self, recurrent_output: Tensor) -> Tensor:
+        """Estimate non-negative elapsed tone length in spectrogram frames."""
+
+        if self.tone_length_head is None:
+            raise ValueError("Auxiliary heads are disabled in this model configuration")
+        return F.softplus(self.tone_length_head(recurrent_output).squeeze(-1))
 
     def extract_frequency_features(self, spectrograms: Tensor) -> Tensor:
         """Run the frequency CNN while preserving the time dimension."""

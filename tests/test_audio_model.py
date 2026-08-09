@@ -167,11 +167,13 @@ def test_training_forward_emits_tone_activity_predictions() -> None:
         )
     )
 
-    logits, lengths, tone_logits = model.forward_with_auxiliary(
+    logits, lengths, tone_logits, tone_length = model.forward_with_auxiliary(
         batch.spectrograms,
         batch.input_lengths,
     )
 
     assert logits.shape[:2] == batch.spectrograms.shape[:2]
     assert tone_logits.shape == batch.spectrograms.shape[:2]
+    assert tone_length.shape == batch.spectrograms.shape[:2]
+    assert torch.all(tone_length >= 0.0)
     assert torch.equal(lengths, batch.input_lengths)

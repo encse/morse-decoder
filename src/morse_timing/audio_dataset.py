@@ -147,6 +147,7 @@ class AudioSequenceSample:
     spectrogram: Tensor
     targets: Tensor
     tone_activity: Tensor
+    tone_length: Tensor
     text: str
 
     @property
@@ -198,6 +199,7 @@ class AudioBatch:
     spectrograms: Tensor
     targets: Tensor
     tone_activity: Tensor
+    tone_length: Tensor
     input_lengths: Tensor
     target_lengths: Tensor
     padding_mask: Tensor
@@ -210,6 +212,7 @@ class AudioBatch:
             spectrograms=self.spectrograms.to(device),
             targets=self.targets.to(device),
             tone_activity=self.tone_activity.to(device),
+            tone_length=self.tone_length.to(device),
             input_lengths=self.input_lengths.to(device),
             target_lengths=self.target_lengths.to(device),
             padding_mask=self.padding_mask.to(device),
@@ -589,6 +592,34 @@ def build_tone_activity(
     return tone_activity
 
 
+def build_tone_length(
+    segments: Sequence[RenderedSegment],
+    frame_count: int,
+    leading_samples: int,
+    spectrogram_config: SpectrogramConfig,
+) -> Tensor:
+    """Return elapsed one-based frame count inside each tone, or zero in gaps."""
+
+    tone_length = torch.zeros(frame_count, dtype=torch.float32)
+    window_length = spectrogram_config.win_length
+    hop_length = spectrogram_config.hop_length
+    frame_starts = torch.arange(frame_count, dtype=torch.long) * hop_length
+    frame_ends = frame_starts + window_length
+    for rendered in segments:
+        if not rendered.segment.is_tone:
+            continue
+        start_sample = leading_samples + rendered.start_sample
+        end_sample = leading_samples + rendered.end_sample
+        active = (frame_ends > start_sample) & (frame_starts < end_sample)
+        elapsed = torch.div(
+            (frame_starts - start_sample).clamp_min(0),
+            hop_length,
+            rounding_mode="floor",
+        ).to(torch.float32) + 1.0
+        tone_length = torch.maximum(tone_length, torch.where(active, elapsed, 0.0))
+    return tone_length
+
+
 def render_audio_sequence_sample(
     text: str,
     config: Stage1DatasetConfig | None = None,
@@ -706,6 +737,12 @@ def render_audio_sequence_sample(
         leading_samples,
         selected_config.spectrogram,
     )
+    tone_length = build_tone_length(
+        rendered_segments,
+        features.shape[0],
+        leading_samples,
+        selected_config.spectrogram,
+    )
     targets = torch.tensor(
         [int(token) for token in text_to_audio_tokens(normalized_text)],
         dtype=torch.long,
@@ -714,6 +751,7 @@ def render_audio_sequence_sample(
         spectrogram=features,
         targets=targets,
         tone_activity=tone_activity,
+        tone_length=tone_length,
         text=normalized_text,
     )
     return RenderedTrainingSample(
@@ -805,6 +843,7 @@ def render_noise_only_sequence_sample(
         spectrogram=features,
         targets=torch.empty(0, dtype=torch.long),
         tone_activity=torch.zeros(features.shape[0], dtype=torch.float32),
+        tone_length=torch.zeros(features.shape[0], dtype=torch.float32),
         text="",
     )
     return RenderedTrainingSample(
@@ -886,12 +925,18 @@ def collate_audio_sequences(samples: Sequence[AudioSequenceSample]) -> AudioBatc
         batch_first=True,
         padding_value=0.0,
     )
+    tone_length = pad_sequence(
+        [sample.tone_length for sample in samples],
+        batch_first=True,
+        padding_value=0.0,
+    )
     positions = torch.arange(spectrograms.shape[1]).unsqueeze(0)
     padding_mask = positions >= input_lengths.unsqueeze(1)
     return AudioBatch(
         spectrograms=spectrograms,
         targets=targets,
         tone_activity=tone_activity,
+        tone_length=tone_length,
         input_lengths=input_lengths,
         target_lengths=target_lengths,
         padding_mask=padding_mask,

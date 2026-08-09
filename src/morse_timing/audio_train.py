@@ -46,6 +46,17 @@ class OverfitMetrics:
 
 
 TONE_ACTIVITY_LOSS_WEIGHT = 0.3
+TONE_LENGTH_LOSS_WEIGHT = 0.3
+AUXILIARY_GRADIENT_TARGET_RATIO = 0.3
+MIN_AUXILIARY_LOSS_WEIGHT = 0.001
+MAX_AUXILIARY_LOSS_WEIGHT = 100.0
+AUXILIARY_CALIBRATION_BATCHES = 4
+
+
+@dataclass(frozen=True)
+class AuxiliaryLossWeights:
+    tone: float = TONE_ACTIVITY_LOSS_WEIGHT
+    tone_length: float = TONE_LENGTH_LOSS_WEIGHT
 
 
 def select_device(requested: str) -> torch.device:
@@ -150,6 +161,12 @@ def train_epoch(
     model.train()
     total_loss = 0.0
     total_samples = 0
+    auxiliary_weights = getattr(model, "_auxiliary_loss_weights", None)
+    if auxiliary_weights is None:
+        auxiliary_weights = _calibrate_auxiliary_weights_from_loader(
+            model, loader, device, AUXILIARY_CALIBRATION_BATCHES
+        )
+        model._auxiliary_loss_weights = auxiliary_weights
     started_at = perf_counter()
     profile_totals = {
         name: 0.0
@@ -201,6 +218,7 @@ def train_epoch(
                 "classifier", lambda: model.classify_frames(recurrent_output)
             )
             tone_logits = model.classify_auxiliary(recurrent_output)
+            tone_length = model.estimate_tone_length(recurrent_output)
             output_lengths = batch.input_lengths
             loss = timed(
                 "loss",
@@ -209,6 +227,8 @@ def train_epoch(
                     output_lengths,
                     batch,
                     tone_logits,
+                    tone_length,
+                    weights=auxiliary_weights,
                 ),
             )
             timed("backward", loss.backward)
@@ -219,6 +239,7 @@ def train_epoch(
                 logits,
                 output_lengths,
                 tone_logits,
+                tone_length,
             ) = model.forward_with_auxiliary(
                 batch.spectrograms,
                 batch.input_lengths,
@@ -228,6 +249,8 @@ def train_epoch(
                 output_lengths,
                 batch,
                 tone_logits,
+                tone_length,
+                weights=auxiliary_weights,
             )
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
@@ -284,6 +307,7 @@ def evaluate_overfit_dataset(
             logits,
             output_lengths,
             tone_logits,
+            tone_length,
         ) = model.forward_with_auxiliary(
             batch.spectrograms,
             batch.input_lengths,
@@ -299,6 +323,7 @@ def evaluate_overfit_dataset(
             output_lengths,
             batch,
             tone_logits,
+            tone_length,
             ctc_loss,
         )
         predictions = greedy_decode_batch(logits, output_lengths)
@@ -345,9 +370,11 @@ def _training_loss(
     output_lengths: Tensor,
     batch: AudioBatch,
     tone_activity_logits: Tensor,
+    tone_length: Tensor,
     ctc_loss: Tensor | None = None,
+    weights: AuxiliaryLossWeights | None = None,
 ) -> Tensor:
-    """Calculate the fixed CTC plus tone-activity training objective."""
+    """Calculate CTC plus gradient-balanced tone auxiliary objectives."""
 
     if ctc_loss is None:
         ctc_loss = compute_ctc_loss(
@@ -356,16 +383,118 @@ def _training_loss(
             output_lengths,
             batch.target_lengths,
         )
+    tone_loss, tone_length_loss = _auxiliary_losses(
+        batch, tone_activity_logits, tone_length
+    )
+    selected = weights or AuxiliaryLossWeights()
+    return ctc_loss + selected.tone * tone_loss.to(ctc_loss.device) + (
+        selected.tone_length * tone_length_loss.to(ctc_loss.device)
+    )
+
+
+def _auxiliary_losses(
+    batch: AudioBatch,
+    tone_activity_logits: Tensor,
+    tone_length: Tensor,
+) -> tuple[Tensor, Tensor]:
     valid = ~batch.padding_mask
     tone_loss = F.binary_cross_entropy_with_logits(
         tone_activity_logits,
         batch.tone_activity,
         reduction="none",
     )[valid].mean()
-    return (
-        ctc_loss
-        + TONE_ACTIVITY_LOSS_WEIGHT * tone_loss.to(ctc_loss.device)
+    tone_length_loss = F.smooth_l1_loss(
+        tone_length[valid],
+        batch.tone_length[valid],
+        beta=1.0,
     )
+    return tone_loss, tone_length_loss
+
+
+def _gradient_norm(loss: Tensor, parameters: tuple[Tensor, ...]) -> float:
+    gradients = torch.autograd.grad(
+        loss, parameters, retain_graph=True, allow_unused=True
+    )
+    squared = sum(
+        float(gradient.detach().float().square().sum())
+        for gradient in gradients
+        if gradient is not None
+    )
+    return squared**0.5
+
+
+def _auxiliary_gradient_norms(
+    model: MorseAudioCTCModel,
+    logits: Tensor,
+    output_lengths: Tensor,
+    batch: AudioBatch,
+    tone_activity_logits: Tensor,
+    tone_length: Tensor,
+) -> tuple[float, float, float]:
+    """Measure raw objective gradient norms on the shared sequence encoder."""
+
+    ctc_loss = compute_ctc_loss(
+        logits, batch.targets, output_lengths, batch.target_lengths
+    )
+    tone_loss, tone_length_loss = _auxiliary_losses(
+        batch, tone_activity_logits, tone_length
+    )
+    shared = tuple(model.sequence_encoder.parameters())
+    return (
+        _gradient_norm(ctc_loss, shared),
+        _gradient_norm(tone_loss, shared),
+        _gradient_norm(tone_length_loss, shared),
+    )
+
+
+def _calibrate_auxiliary_weights_from_loader(
+    model: MorseAudioCTCModel,
+    loader: DataLoader[AudioBatch],
+    device: torch.device,
+    maximum_batches: int,
+) -> AuxiliaryLossWeights:
+    """Calibrate once from several batches and keep the weights fixed thereafter."""
+
+    totals = [0.0, 0.0, 0.0]
+    measured = 0
+    for cpu_batch in loader:
+        batch = cpu_batch.to(device)
+        logits, lengths, tone_logits, tone_length = model.forward_with_auxiliary(
+            batch.spectrograms, batch.input_lengths
+        )
+        norms = _auxiliary_gradient_norms(
+            model, logits, lengths, batch, tone_logits, tone_length
+        )
+        totals = [total + value for total, value in zip(totals, norms, strict=True)]
+        measured += 1
+        if measured >= maximum_batches:
+            break
+    if measured == 0:
+        raise ValueError("Cannot calibrate auxiliary losses with an empty loader")
+    ctc_norm, tone_norm, tone_length_norm = (
+        total / measured for total in totals
+    )
+
+    def weight(auxiliary_norm: float) -> float:
+        if ctc_norm == 0.0 or auxiliary_norm == 0.0:
+            return MIN_AUXILIARY_LOSS_WEIGHT
+        value = AUXILIARY_GRADIENT_TARGET_RATIO * ctc_norm / auxiliary_norm
+        return min(MAX_AUXILIARY_LOSS_WEIGHT, max(MIN_AUXILIARY_LOSS_WEIGHT, value))
+
+    weights = AuxiliaryLossWeights(weight(tone_norm), weight(tone_length_norm))
+    print(
+        "auxiliary_gradient_calibration_once "
+        f"batches={measured} "
+        f"ctc={ctc_norm:.6g} tone_raw={tone_norm:.6g} "
+        f"tone_length_raw={tone_length_norm:.6g} "
+        f"tone_lambda={weights.tone:.6g} "
+        f"tone_length_lambda={weights.tone_length:.6g} "
+        f"tone_ratio={weights.tone * tone_norm / max(ctc_norm, 1e-12):.3f} "
+        f"tone_length_ratio="
+        f"{weights.tone_length * tone_length_norm / max(ctc_norm, 1e-12):.3f}",
+        flush=True,
+    )
+    return weights
 
 
 def save_checkpoint(
