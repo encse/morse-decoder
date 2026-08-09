@@ -66,6 +66,37 @@ def test_one_training_epoch_updates_the_audio_model() -> None:
     assert model.tone_length_head.weight.grad is not None
 
 
+def test_ctc_warmup_defers_auxiliary_calibration() -> None:
+    dataset = CleanAudioMorseDataset(2, texts=["E", "T"])
+    loader = DataLoader(
+        [dataset[0], dataset[1]],
+        batch_size=2,
+        collate_fn=collate_audio_sequences,
+    )
+    model = MorseAudioCTCModel(
+        AudioModelConfig(projection_size=8, hidden_size=8, dense_layers=2)
+    )
+    optimizer = AdamW(model.parameters(), lr=1e-3)
+
+    train_epoch(
+        model,
+        loader,
+        optimizer,
+        torch.device("cpu"),
+        5.0,
+        0,
+        auxiliary_enabled=False,
+    )
+
+    assert not hasattr(model, "_auxiliary_loss_weights")
+    assert model.tone_activity_head.weight.grad is None
+    assert model.tone_length_head.weight.grad is None
+
+    train_epoch(model, loader, optimizer, torch.device("cpu"), 5.0, 0)
+
+    assert hasattr(model, "_auxiliary_loss_weights")
+
+
 def test_noise_only_batch_with_empty_ctc_targets_can_be_trained() -> None:
     dataset = CleanAudioMorseDataset(
         2,

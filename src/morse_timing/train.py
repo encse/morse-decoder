@@ -35,6 +35,7 @@ from morse_timing.audio_train import (
     OverfitMetrics,
     TONE_ACTIVITY_LOSS_WEIGHT,
     TONE_LENGTH_LOSS_WEIGHT,
+    calibrate_auxiliary_loss_weights,
     evaluate_overfit_dataset,
     select_device,
     set_seed,
@@ -683,6 +684,7 @@ def main(argv: list[str] | None = None) -> None:
                 pin_memory,
             )
         print(f"epoch={epoch:03d} train", flush=True)
+        auxiliary_enabled = hasattr(model, "_auxiliary_loss_weights")
         training_loss = train_epoch(
             model,
             training_loader,
@@ -691,11 +693,13 @@ def main(argv: list[str] | None = None) -> None:
             args.gradient_clip,
             args.log_interval,
             args.profile_batches if epoch == start_epoch else 0,
+            auxiliary_enabled=auxiliary_enabled,
         )
         validation = evaluate_overfit_dataset(
             model,
             validation_loader,
             device,
+            auxiliary_enabled=auxiliary_enabled,
         )
         scheduler.step(validation.ctc_loss)
         learning_rate = optimizer.param_groups[0]["lr"]
@@ -762,6 +766,8 @@ def main(argv: list[str] | None = None) -> None:
             else 0
         )
         if consecutive_target_epochs >= args.target_epochs:
+            if not hasattr(model, "_auxiliary_loss_weights"):
+                calibrate_auxiliary_loss_weights(model, training_loader, device)
             completed_experiment = dict(experiment)
             completed_experiment["curriculum_target_reached"] = True
             save_training_checkpoint(

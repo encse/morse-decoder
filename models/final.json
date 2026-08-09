@@ -1,7 +1,46 @@
 {
-  "best_character_error_rate": 0.03810775295663601,
-  "best_token_error_rate": 0.002687470646558472,
-  "checkpoint": "/kaggle/working/models/morse-lstm-amplitude-curriculum.working-stage-018.pt",
+  "auxiliary_loss_weights": {
+    "tone": 0.014734037805921571,
+    "tone_length": 0.027133604169250883
+  },
+  "best_character_error_rate": 0.011563731931668857,
+  "best_token_error_rate": 0.0008349423367948651,
+  "checkpoint": "/kaggle/working/models/morse-lstm-curriculum.stages/stage-072.pt",
+  "curriculum_ranges": {
+    "amplitude": [
+      10.0,
+      150.0
+    ],
+    "fade_depth": [
+      0.0,
+      40.0
+    ],
+    "fade_frequency": [
+      0.1,
+      2.0
+    ],
+    "frequency": [
+      100.0,
+      2000.0
+    ],
+    "jitter": [
+      0.0,
+      0.08
+    ],
+    "noise_power": [
+      0.0,
+      40.0
+    ],
+    "rise_fall": [
+      0.0,
+      10.0
+    ],
+    "wpm": [
+      13.0,
+      37.0
+    ]
+  },
+  "curriculum_stage": 72,
   "dataset_config": {
     "apply_input_filter": true,
     "audio": {
@@ -11,7 +50,7 @@
       "sample_rate": 8000
     },
     "extended_space_probability": 0.5,
-    "fade_depth_percent": 60.0,
+    "fade_depth_percent": 40.0,
     "gap_timing": {
       "character_extreme_probability": 0.6,
       "character_extreme_width_units": 0.3,
@@ -30,8 +69,8 @@
     "max_frequency_hz": 2000.0,
     "max_noise_only_seconds": 4.0,
     "max_rise_fall_ms": 10.0,
-    "max_wpm": 40.0,
-    "min_amplitude_percent": 12.0,
+    "max_wpm": 37.0,
+    "min_amplitude_percent": 10.0,
     "min_characters": 2,
     "min_extended_space_multiplier": 2,
     "min_fade_frequency_hz": 0.1,
@@ -39,7 +78,7 @@
     "min_noise_only_power": 1.0,
     "min_noise_only_seconds": 2.0,
     "min_rise_fall_ms": 0.0,
-    "min_wpm": 10.0,
+    "min_wpm": 13.0,
     "noise_only_probability": 0.2,
     "noise_percent": 0.0,
     "noise_power": 40.0,
@@ -57,34 +96,32 @@
     "word_boundary_sample_probability": 0.5,
     "wpm": 20.0
   },
-  "epoch": 15,
+  "epoch": 22,
   "experiment": {
-    "curriculum_target_reached": false,
-    "frequency_accuracy_threshold": 0.9,
-    "frequency_loss_weight": 0.05,
-    "frequency_tolerance_hz": 50.0,
+    "auxiliary_gradient_target_ratio": 0.3,
+    "curriculum_target_reached": true,
+    "maximum_auxiliary_loss_weight": 100.0,
+    "minimum_auxiliary_loss_weight": 0.001,
     "perfect_epochs": 5,
     "regenerate_every": 10,
     "seed": 42,
     "target_epochs": 2,
-    "target_exact_text": 0.95,
+    "target_exact_text": 0.98,
     "tone_activity_loss_weight": 0.3,
-    "train_samples": 12000,
+    "tone_length_loss_weight": 0.3,
+    "train_samples": 6000,
     "validation_samples": 1200
   },
   "format_version": 1,
   "metrics": {
-    "character_error_rate": 0.03810775295663601,
-    "ctc_loss": 0.014978969891453744,
-    "exact_text_accuracy": 0.95,
-    "exact_token_accuracy": 0.95,
+    "character_error_rate": 0.011563731931668857,
+    "ctc_loss": 0.0038045796109751487,
+    "exact_text_accuracy": 0.9816666666666667,
+    "exact_token_accuracy": 0.9816666666666667,
     "example_prediction": "_3UJPP )=",
     "example_reference": "_3UJPP )=",
-    "frequency_loss": 0.0014138052987522985,
-    "frequency_mean_absolute_error_hz": 8.583456710012335,
-    "frequency_within_50hz_accuracy": 0.9968421052631579,
-    "loss": 0.03952204816043377,
-    "token_error_rate": 0.002687470646558472
+    "loss": 0.05140946994225184,
+    "token_error_rate": 0.0008349423367948651
   },
   "model_config": {
     "auxiliary_heads": true,

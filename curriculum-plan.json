@@ -1,5 +1,5 @@
 {
-  "name": "morse-lstm-amplitude-curriculum",
+  "name": "morse-lstm-curriculum",
   "output_directory": "models",
   "initial_checkpoint": null,
   "resume_initial_checkpoint": false,
@@ -21,64 +21,55 @@
     "learning_rate": 0.0008,
     "minimum_learning_rate": 0.0001,
     "regenerate_every": 10,
-    "perfect_epochs": 5,
-    "apply_input_filter": true
+    "perfect_epochs": 5
   },
   "dimensions": {
     "wpm": {
       "lower_limit": 10,
       "upper_limit": 40,
-      "start_minimum": 10,
-      "start_maximum": 40,
+      "start": 25,
       "step": 2
     },
     "frequency": {
       "lower_limit": 100,
       "upper_limit": 2000,
-      "start_minimum": 100,
-      "start_maximum": 2000,
+      "start": 700,
       "step": 100
     },
     "jitter": {
       "lower_limit": 0,
       "upper_limit": 0.08,
-      "start_minimum": 0,
-      "start_maximum": 0.08,
+      "start": 0,
       "step": 0.02
     },
     "noise_power": {
       "lower_limit": 0,
       "upper_limit": 40,
-      "start_minimum": 0,
-      "start_maximum": 40,
+      "start": 0,
       "step": 5
     },
     "amplitude": {
       "lower_limit": 10,
       "upper_limit": 150,
-      "start_minimum": 29,
-      "start_maximum": 150,
+      "start": 100,
       "step": 5
     },
     "fade_depth": {
       "lower_limit": 0,
       "upper_limit": 60,
-      "start_minimum": 0,
-      "start_maximum": 60,
+      "start": 0,
       "step": 10
     },
     "fade_frequency": {
       "lower_limit": 0.1,
       "upper_limit": 2.0,
-      "start_minimum": 0.1,
-      "start_maximum": 2.0,
+      "start": 0.5,
       "step": 0.2
     },
     "rise_fall": {
       "lower_limit": 0,
       "upper_limit": 10,
-      "start_minimum": 0,
-      "start_maximum": 10,
+      "start": 0,
       "step": 1
     }
   }

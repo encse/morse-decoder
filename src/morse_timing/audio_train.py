@@ -156,13 +156,14 @@ def train_epoch(
     gradient_clip: float,
     log_interval: int,
     profile_batches: int = 0,
+    auxiliary_enabled: bool = True,
 ) -> float:
     """Optimize the model once with the fixed curriculum objective."""
     model.train()
     total_loss = 0.0
     total_samples = 0
     auxiliary_weights = getattr(model, "_auxiliary_loss_weights", None)
-    if auxiliary_weights is None:
+    if auxiliary_enabled and auxiliary_weights is None:
         auxiliary_weights = _calibrate_auxiliary_weights_from_loader(
             model, loader, device, AUXILIARY_CALIBRATION_BATCHES
         )
@@ -217,41 +218,59 @@ def train_epoch(
             logits = timed(
                 "classifier", lambda: model.classify_frames(recurrent_output)
             )
-            tone_logits = model.classify_auxiliary(recurrent_output)
-            tone_length = model.estimate_tone_length(recurrent_output)
             output_lengths = batch.input_lengths
+            if auxiliary_enabled:
+                tone_logits = model.classify_auxiliary(recurrent_output)
+                tone_length = model.estimate_tone_length(recurrent_output)
             loss = timed(
                 "loss",
-                lambda: _training_loss(
-                    logits,
-                    output_lengths,
-                    batch,
-                    tone_logits,
-                    tone_length,
-                    weights=auxiliary_weights,
+                lambda: (
+                    _training_loss(
+                        logits,
+                        output_lengths,
+                        batch,
+                        tone_logits,
+                        tone_length,
+                        weights=auxiliary_weights,
+                    )
+                    if auxiliary_enabled
+                    else compute_ctc_loss(
+                        logits,
+                        batch.targets,
+                        output_lengths,
+                        batch.target_lengths,
+                    )
                 ),
             )
             timed("backward", loss.backward)
         else:
             batch = cpu_batch.to(device)
             optimizer.zero_grad(set_to_none=True)
-            (
-                logits,
-                output_lengths,
-                tone_logits,
-                tone_length,
-            ) = model.forward_with_auxiliary(
-                batch.spectrograms,
-                batch.input_lengths,
-            )
-            loss = _training_loss(
-                logits,
-                output_lengths,
-                batch,
-                tone_logits,
-                tone_length,
-                weights=auxiliary_weights,
-            )
+            if auxiliary_enabled:
+                logits, output_lengths, tone_logits, tone_length = (
+                    model.forward_with_auxiliary(
+                        batch.spectrograms,
+                        batch.input_lengths,
+                    )
+                )
+                loss = _training_loss(
+                    logits,
+                    output_lengths,
+                    batch,
+                    tone_logits,
+                    tone_length,
+                    weights=auxiliary_weights,
+                )
+            else:
+                logits, output_lengths = model(
+                    batch.spectrograms, batch.input_lengths
+                )
+                loss = compute_ctc_loss(
+                    logits,
+                    batch.targets,
+                    output_lengths,
+                    batch.target_lengths,
+                )
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
         if profiling:
@@ -287,6 +306,7 @@ def evaluate_overfit_dataset(
     model: MorseAudioCTCModel,
     loader: DataLoader[AudioBatch],
     device: torch.device,
+    auxiliary_enabled: bool = True,
 ) -> OverfitMetrics:
     """Measure token and decoded-text quality with the training objective."""
     model.eval()
@@ -318,13 +338,17 @@ def evaluate_overfit_dataset(
             output_lengths,
             batch.target_lengths,
         )
-        loss = _training_loss(
-            logits,
-            output_lengths,
-            batch,
-            tone_logits,
-            tone_length,
-            ctc_loss,
+        loss = (
+            _training_loss(
+                logits,
+                output_lengths,
+                batch,
+                tone_logits,
+                tone_length,
+                ctc_loss,
+            )
+            if auxiliary_enabled
+            else ctc_loss
         )
         predictions = greedy_decode_batch(logits, output_lengths)
         references = split_concatenated_targets(batch.targets, batch.target_lengths)
@@ -494,6 +518,21 @@ def _calibrate_auxiliary_weights_from_loader(
         f"{weights.tone_length * tone_length_norm / max(ctc_norm, 1e-12):.3f}",
         flush=True,
     )
+    return weights
+
+
+def calibrate_auxiliary_loss_weights(
+    model: MorseAudioCTCModel,
+    loader: DataLoader[AudioBatch],
+    device: torch.device,
+) -> AuxiliaryLossWeights:
+    """Calibrate and retain fixed auxiliary weights after CTC pretraining."""
+
+    model.train()
+    weights = _calibrate_auxiliary_weights_from_loader(
+        model, loader, device, AUXILIARY_CALIBRATION_BATCHES
+    )
+    model._auxiliary_loss_weights = weights
     return weights
 
 
